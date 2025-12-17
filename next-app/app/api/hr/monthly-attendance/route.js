@@ -347,8 +347,11 @@ export async function GET(req) {
           if (saturdayIndex % 2 === 1) isWeekendOff = true;
         }
 
-        // Prefer employee's current shift for calculations, but keep stored shift for display
-        const shift = empShift || doc?.shift || '';
+        // Always use employee's current shift for calculations (ensures D3 employees get D3 calculations)
+        // This ensures old records are recalculated with the correct shift
+        const shift = empShift || doc?.shift || 'D1';
+        // Validate shift is one of the known shifts
+        const validShift = ['D1', 'D2', 'D3', 'S1', 'S2'].includes(shift) ? shift : (empShift || 'D1');
 
         if (isFutureDay) {
           days.push({
@@ -400,8 +403,9 @@ export async function GET(req) {
         let dayViolationMinutes = 0;
 
         // Late / Early calculation only if both punches and not a holiday
+        // Use validShift to ensure correct shift is used for calculations
         if (checkIn && checkOut && status !== 'Holiday') {
-          const flags = computeLateEarly(shift, checkIn, checkOut);
+          const flags = computeLateEarly(validShift, checkIn, checkOut);
           late = !!flags.late;
           earlyLeave = !!flags.earlyLeave;
 
@@ -474,7 +478,7 @@ export async function GET(req) {
 
         days.push({
           date,
-          shift,
+          shift: validShift, // Use validated shift to ensure D3 is properly stored
           status,
           reason,
           checkIn: checkIn ? checkIn.toISOString() : null,
