@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 export default function MobileOnlyGuard({ children }) {
-  const [isMobile, setIsMobile] = useState(true);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
@@ -12,7 +12,7 @@ export default function MobileOnlyGuard({ children }) {
       const screenWidth = window.innerWidth;
       const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
       
-      // Mobile and tablet device patterns (ALLOW these)
+      // Mobile and tablet device patterns (BLOCK these)
       const mobileTabletPatterns = [
         /Android/i,
         /webOS/i,
@@ -25,7 +25,7 @@ export default function MobileOnlyGuard({ children }) {
         /Tablet/i,
       ];
 
-      // Desktop/laptop user agent patterns (BLOCK these)
+      // Desktop/laptop user agent patterns (ALLOW these)
       const desktopPatterns = [
         /Windows NT/i,
         /Macintosh/i,
@@ -43,25 +43,25 @@ export default function MobileOnlyGuard({ children }) {
         pattern.test(userAgent)
       ) && !isMobileTabletUserAgent;
 
-      // Determine if device should be ALLOWED (mobile/tablet):
-      // 1. User agent matches mobile/tablet patterns → ALLOW
-      // 2. User agent matches desktop patterns → BLOCK
-      // 3. Otherwise (unknown): if has touch AND small screen (<= 768px) → ALLOW, else BLOCK
+      // Determine if device should be ALLOWED (desktop/laptop):
+      // 1. User agent matches desktop patterns → ALLOW
+      // 2. User agent matches mobile/tablet patterns → BLOCK
+      // 3. Otherwise (unknown): if NO touch AND large screen (> 1024px) → ALLOW, else BLOCK
       let shouldAllow = false;
       
       if (isMobileTabletUserAgent) {
-        // Clearly a mobile/tablet device → ALLOW
-        shouldAllow = true;
-      } else if (isDesktopUserAgent) {
-        // Clearly a desktop/laptop → BLOCK
+        // Clearly a mobile/tablet device → BLOCK
         shouldAllow = false;
+      } else if (isDesktopUserAgent) {
+        // Clearly a desktop/laptop → ALLOW
+        shouldAllow = true;
       } else {
         // Unknown device: check touch + screen size
-        // If has touch screen and small screen, likely a tablet/phone → ALLOW
-        shouldAllow = hasTouchScreen && screenWidth <= 768;
+        // If NO touch screen and large screen, likely a desktop → ALLOW
+        shouldAllow = !hasTouchScreen && screenWidth > 1024;
       }
 
-      setIsMobile(shouldAllow);
+      setIsDesktop(shouldAllow);
       setIsChecking(false);
     }
 
@@ -112,8 +112,8 @@ export default function MobileOnlyGuard({ children }) {
     );
   }
 
-  // Show restriction message for desktop/laptop
-  if (!isMobile) {
+  // Show restriction message for mobile/tablets
+  if (!isDesktop) {
     return (
       <div
         style={{
@@ -140,7 +140,7 @@ export default function MobileOnlyGuard({ children }) {
             boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
           }}
         >
-          {/* Icon */}
+          {/* Icon - Desktop/Laptop */}
           <div
             style={{
               width: "120px",
@@ -164,8 +164,9 @@ export default function MobileOnlyGuard({ children }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-              <line x1="12" y1="18" x2="12.01" y2="18" />
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
           </div>
 
@@ -179,7 +180,7 @@ export default function MobileOnlyGuard({ children }) {
               letterSpacing: "-0.5px",
             }}
           >
-            Mobile & Tablet Access Only
+            Desktop & Laptop Access Only
           </h1>
 
           {/* Message */}
@@ -191,8 +192,8 @@ export default function MobileOnlyGuard({ children }) {
               marginBottom: "24px",
             }}
           >
-            This application is optimized for mobile devices and tablets. 
-            Please access it from your smartphone or tablet for the best experience.
+            This application is optimized for desktop and laptop computers. 
+            Please access it from your desktop or laptop browser for the best experience.
           </p>
 
           {/* Supported Devices */}
@@ -235,7 +236,7 @@ export default function MobileOnlyGuard({ children }) {
                   border: "1px solid rgba(74, 144, 226, 0.2)",
                 }}
               >
-                📱 Smartphones
+                💻 Windows PC
               </span>
               <span
                 style={{
@@ -245,7 +246,7 @@ export default function MobileOnlyGuard({ children }) {
                   border: "1px solid rgba(74, 144, 226, 0.2)",
                 }}
               >
-                📱 Tablets
+                💻 Mac
               </span>
               <span
                 style={{
@@ -255,7 +256,7 @@ export default function MobileOnlyGuard({ children }) {
                   border: "1px solid rgba(74, 144, 226, 0.2)",
                 }}
               >
-                📱 iPads
+                💻 Linux
               </span>
             </div>
           </div>
@@ -288,7 +289,7 @@ export default function MobileOnlyGuard({ children }) {
     );
   }
 
-  // Allow access for mobile/tablet devices
+  // Allow access for desktop/laptop devices
   return <>{children}</>;
 }
 
