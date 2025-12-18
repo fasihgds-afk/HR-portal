@@ -1,4 +1,4 @@
-// next-app/middleware.js
+// next-app/proxy.ts (Next.js 16 uses proxy.ts instead of middleware.ts)
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 
@@ -14,19 +14,23 @@ export default withAuth(
     if (pathname.startsWith('/hr')) {
       // 1) Not logged in at all  -> send to HR login
       if (!token) {
+        console.log('[Middleware] No token found, redirecting to login');
         url.pathname = '/login';
         url.searchParams.set('role', 'hr');
         return NextResponse.redirect(url);
       }
 
-      // 2) Logged in but not HR role -> also send to HR login
-      if (token.role !== 'HR') {
+      // 2) Logged in but not HR or ADMIN role -> also send to HR login
+      // Allow both HR and ADMIN roles (as per auth route)
+      if (token.role !== 'HR' && token.role !== 'ADMIN') {
+        console.log('[Middleware] Invalid role:', token.role, 'expected HR or ADMIN');
         url.pathname = '/login';
         url.searchParams.set('role', 'hr');
         return NextResponse.redirect(url);
       }
 
-      // 3) token.role === 'HR' -> let request continue
+      // 3) token.role === 'HR' or 'ADMIN' -> let request continue
+      console.log('[Middleware] Access granted for role:', token.role);
       return NextResponse.next();
     }
 

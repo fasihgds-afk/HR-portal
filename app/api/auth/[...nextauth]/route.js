@@ -8,6 +8,8 @@ import bcrypt from "bcryptjs";
 
 export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
+  // Add trustHost for Vercel deployment
+  trustHost: true,
 
   providers: [
     CredentialsProvider({

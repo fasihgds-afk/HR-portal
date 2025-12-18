@@ -68,7 +68,9 @@ function LoginInner() {
         return;
       }
 
-      router.push(result.url || "/hr/employees");
+      // Use window.location for a full page reload to ensure session cookie is sent
+      // This is more reliable than router.push for initial login
+      window.location.href = result.url || "/hr/employees";
     } catch (err) {
       console.error("HR login error", err);
       setErrorMsg("Something went wrong. Please try again.");
