@@ -1034,6 +1034,21 @@ export async function POST(req) {
 
     const hasPunch = !!checkIn || !!checkOut;
 
+    // Determine if this date is a weekend (same logic as GET endpoint)
+    const dateObj = new Date(`${date}T00:00:00${TZ}`);
+    const localMs = dateObj.getTime() + COMPANY_OFFSET_MS;
+    const local = new Date(localMs);
+    const dow = local.getUTCDay(); // Day of week in company timezone
+    
+    let isWeekendOff = false;
+    if (dow === 0) {
+      isWeekendOff = true; // Sunday
+    } else if (dow === 6) {
+      // Saturday: check if it's an alternating Saturday off
+      // For now, treat all Saturdays as off (can be customized)
+      isWeekendOff = true;
+    }
+
     let rawStatus = status;
     let attendanceStatus;
 
@@ -1045,7 +1060,7 @@ export async function POST(req) {
       }
     }
 
-    attendanceStatus = normalizeStatus(rawStatus, { isWeekendOff: false });
+    attendanceStatus = normalizeStatus(rawStatus, { isWeekendOff });
 
     const totalPunches = checkIn && checkOut ? 2 : hasPunch ? 1 : 0;
 
