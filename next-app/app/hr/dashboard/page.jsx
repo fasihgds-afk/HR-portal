@@ -1,7 +1,7 @@
-// next-app/app/hr/page.jsx
+// next-app/app/hr/dashboard/page.jsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 
@@ -35,7 +35,7 @@ function formatDateTime(value) {
   });
 }
 
-export default function HrPage() {
+export default function HrDashboardPage() {
   const [businessDate, setBusinessDate] = useState(() => {
     const today = new Date();
     return today.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -44,6 +44,8 @@ export default function HrPage() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [shifts, setShifts] = useState([]);
+  const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
 
   const [toast, setToast] = useState({ type: '', text: '' });
 
@@ -54,6 +56,22 @@ export default function HrPage() {
     }, 2600);
   }
 
+  async function loadShifts() {
+    try {
+      const res = await fetch('/api/hr/shifts?activeOnly=true');
+      if (res.ok) {
+        const data = await res.json();
+        setShifts(data.shifts || []);
+      }
+    } catch (err) {
+      console.error('Failed to load shifts:', err);
+    }
+  }
+
+  useEffect(() => {
+    loadShifts();
+  }, []);
+
   async function handleLoadAndSave() {
     setLoading(true);
     setStatus('');
@@ -61,7 +79,7 @@ export default function HrPage() {
 
     try {
       const res = await fetch(
-        `/api/hr/shift-attendance?date=${businessDate}`,
+        `/api/hr/daily-attendance?date=${businessDate}`,
         { method: 'POST' }
       );
 
@@ -115,24 +133,32 @@ export default function HrPage() {
   // ---------- SEARCH FILTER (table only, stats still use full rows) ----------
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
-  const filteredRows = !normalizedSearch
-    ? rows
-    : rows.filter((r) => {
-        const text = [
-          r.empCode,
-          r.employeeName,
-          r.name,
-          r.department,
-          r.designation,
-          r.shift,
-          r.attendanceStatus,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
+  const filteredRows = rows.filter((r) => {
+    // Shift filter
+    if (selectedShift && r.shift !== selectedShift) {
+      return false;
+    }
+    
+    // Search filter
+    if (normalizedSearch) {
+      const text = [
+        r.empCode,
+        r.employeeName,
+        r.name,
+        r.department,
+        r.designation,
+        r.shift,
+        r.attendanceStatus,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-        return text.includes(normalizedSearch);
-      });
+      return text.includes(normalizedSearch);
+    }
+    
+    return true;
+  });
 
   // ---------- Department ordering & manager / TL on top ----------
 
@@ -707,11 +733,16 @@ export default function HrPage() {
             >
               <strong style={{ color: '#ffffffff' }}>Shift Legend:</strong>
               <span>
-                <strong>Shift 1</strong> = Day (09:00–18:00),{' '}
-                <strong>Shift 2</strong> = Day (15:00–24:00),{' '}
-                <strong>Shift 5</strong> = Day (12:00–21:00),{' '}
-                <strong>Shift 3</strong> = Night (18:00–03:00),{' '}
-                <strong>Shift 4</strong> = Night (21:00–06:00)
+                {shifts.length > 0 ? (
+                  shifts.map((shift, idx) => (
+                    <span key={shift._id}>
+                      {idx > 0 && ', '}
+                      <strong>{shift.code}</strong> = {shift.name} ({shift.startTime}–{shift.endTime})
+                    </span>
+                  ))
+                ) : (
+                  <span>No shifts configured. Please create shifts first.</span>
+                )}
               </span>
             </div>
 
@@ -755,6 +786,46 @@ export default function HrPage() {
                   />
                 </div>
 
+                <div>
+                  <label
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      display: 'block',
+                      marginBottom: 4,
+                      color: '#111827',
+                    }}
+                  >
+                    Filter by Shift
+                  </label>
+                  <select
+                    value={selectedShift}
+                    onChange={(e) => setSelectedShift(e.target.value)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5f5',
+                      backgroundColor: '#ffffff',
+                      color: '#0f172a',
+                      minWidth: 200,
+                      fontSize: 13,
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="">All Shifts</option>
+                    <option value="">All Shifts</option>
+                    {shifts.length > 0 ? (
+                      shifts.map((shift) => (
+                        <option key={shift._id} value={shift.code}>
+                          {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No shifts available</option>
+                    )}
+                  </select>
+                </div>
+
                 <div
                   style={{
                     display: 'flex',
@@ -765,11 +836,16 @@ export default function HrPage() {
                   }}
                 >
                   <span>
-                    Shift 1: <strong>{totals.D1 ?? 0}</strong> | Shift 2:{' '}
-                    <strong>{totals.D2 ?? 0}</strong> | Shift 5:{' '}
-                    <strong>{totals.D3 ?? 0}</strong> | Shift 3:{' '}
-                    <strong>{totals.S1 ?? 0}</strong> | Shift 4:{' '}
-                    <strong>{totals.S2 ?? 0}</strong>
+                    {shifts.length > 0 ? (
+                      shifts.map((shift, idx) => (
+                        <span key={shift._id}>
+                          {idx > 0 && ' | '}
+                          {shift.code}: <strong>{totals[shift.code] ?? 0}</strong>
+                        </span>
+                      ))
+                    ) : (
+                      <span>No shifts configured</span>
+                    )}
                   </span>
                   {status && (
                     <span style={{ color: '#065f46' }}>{status}</span>
@@ -1127,3 +1203,4 @@ export default function HrPage() {
     </div>
   );
 }
+

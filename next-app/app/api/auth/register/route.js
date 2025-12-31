@@ -10,7 +10,7 @@ export async function POST(req) {
     await connectDB(); // ✅ use connectDB
 
     const body = await req.json();
-    const { email, password, role, empCode } = body;
+    const { email, password, role, empCode, secretKey } = body;
 
     if (!email || !password || !role) {
       return NextResponse.json(
@@ -24,6 +24,32 @@ export async function POST(req) {
         { error: 'Invalid role. Use HR or EMPLOYEE.' },
         { status: 400 }
       );
+    }
+
+    // For HR users, require valid secret key
+    if (role === 'HR') {
+      if (!secretKey) {
+        return NextResponse.json(
+          { error: 'Secret key is required for HR role' },
+          { status: 400 }
+        );
+      }
+
+      const validSecretKey = process.env.HR_SECRET_KEY;
+      if (!validSecretKey) {
+        console.error('[REGISTER ERROR] HR_SECRET_KEY is not set in environment variables');
+        return NextResponse.json(
+          { error: 'Server configuration error' },
+          { status: 500 }
+        );
+      }
+
+      if (secretKey !== validSecretKey) {
+        return NextResponse.json(
+          { error: 'Invalid secret key' },
+          { status: 401 }
+        );
+      }
     }
 
     // For EMPLOYEE users, require valid empCode that exists in Employee collection

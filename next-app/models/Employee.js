@@ -22,10 +22,10 @@ const EmployeeSchema = new mongoose.Schema(
     },
 
     // Legacy shift field (kept for backward compatibility)
+    // Now accepts any shift code dynamically from Shift model
     shift: {
       type: String,
-      enum: ['D1', 'D2', 'S1', 'S2', 'D3'],
-      default: 'D1',
+      // No enum restriction - accepts any shift code from Shift model
     },
     // New: Reference to Shift model (for dynamic shifts)
     shiftId: {

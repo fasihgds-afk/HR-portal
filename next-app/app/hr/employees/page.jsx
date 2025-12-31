@@ -109,11 +109,11 @@ export default function HrDashboardPage() {
   ];
 
   function openMonthlyAttendance() {
-    router.push("/hr/monthly");
+    router.push("/hr/attendance/monthly");
   }
 
   function openDailyAttendance() {
-    router.push("/hr"); // your existing daily attendance page
+    router.push("/hr/dashboard"); // Daily attendance dashboard
   }
 
   function openEmployeesManage() {
@@ -125,7 +125,7 @@ export default function HrDashboardPage() {
   }
 
   function goToUserRegister() {
-    router.push("/auth/register");
+    router.push("/register");
   }
 
   return (
@@ -894,7 +894,7 @@ export default function HrDashboardPage() {
             >
               Choose whether you want to see <strong>daily punches</strong> or{" "}
               <strong>monthly summaries</strong>. These buttons open{" "}
-              <code>/hr</code> and <code>/hr/monthly</code>.
+              <code>/hr/dashboard</code> and <code>/hr/attendance/monthly</code>.
             </p>
 
             <div

@@ -8,8 +8,9 @@ const headerCell = {
   borderBottom: '1px solid #E5E7EB',
   fontSize: 11.5,
   fontWeight: 600,
-  color: '#0f172a',
-  backgroundColor: '#e5f1ff',
+  color: '#ffffff',
+  backgroundColor: '#0c225c', // Logo blue
+  background: 'linear-gradient(135deg, #0c225c, #58D34D)', // Green-blue gradient
   textAlign: 'center',
   whiteSpace: 'nowrap',
   position: 'sticky',
@@ -98,12 +99,12 @@ function getCellStyle(day) {
     day.status === 'Un Paid Leave' ||
     day.status === 'Sick Leave';
 
-  // Work From Home special color
+  // Work From Home special color (using logo blue)
   if (day.status === 'Work From Home') {
     return {
       ...baseCell,
-      backgroundColor: '#e0f2fe', // light blue
-      color: '#0369a1',
+      backgroundColor: '#dbeafe', // Light blue (logo blue tint)
+      color: '#0c225c', // Logo blue text
       fontWeight: 600,
     };
   }
@@ -300,6 +301,8 @@ export default function MonthlyHrPage() {
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ type: '', text: '' });
+  const [shifts, setShifts] = useState([]);
+  const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState(null); // { emp, day }
@@ -349,6 +352,22 @@ export default function MonthlyHrPage() {
       setToast((prev) => (prev.text === text ? { type: '', text: '' } : prev));
     }, 2600);
   }
+
+  async function loadShifts() {
+    try {
+      const res = await fetch('/api/hr/shifts?activeOnly=true');
+      if (res.ok) {
+        const data = await res.json();
+        setShifts(data.shifts || []);
+      }
+    } catch (err) {
+      console.error('Failed to load shifts:', err);
+    }
+  }
+
+  useEffect(() => {
+    loadShifts();
+  }, []);
 
   async function loadMonth() {
     try {
@@ -458,11 +477,20 @@ export default function MonthlyHrPage() {
 
   // Search / filter employees
   const filteredEmployees = (data.employees || []).filter((emp) => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.trim().toLowerCase();
-    const code = String(emp.empCode || '').toLowerCase();
-    const name = String(emp.name || '').toLowerCase();
-    return code.includes(term) || name.includes(term);
+    // Shift filter
+    if (selectedShift && emp.shift !== selectedShift) {
+      return false;
+    }
+    
+    // Search filter
+    if (searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      const code = String(emp.empCode || '').toLowerCase();
+      const name = String(emp.name || '').toLowerCase();
+      return code.includes(term) || name.includes(term);
+    }
+    
+    return true;
   });
 
   // Totals by shift for PRESENT employees only (global), ignoring upcoming days
@@ -1073,9 +1101,9 @@ export default function MonthlyHrPage() {
                 style={{
                   padding: '8px 16px',
                   borderRadius: 999,
-                  border: '1px solid rgba(191,219,254,0.9)',
-                  backgroundColor: 'rgba(15,23,42,0.2)',
-                  color: '#e5f0ff',
+                  border: '1px solid rgba(88,211,77,0.4)', // Logo green border
+                  background: 'linear-gradient(135deg, #0c225c, #58D34D)', // Logo green-blue gradient
+                  color: '#ffffff',
                   fontWeight: 600,
                   fontSize: 12.5,
                   cursor:
@@ -1085,6 +1113,18 @@ export default function MonthlyHrPage() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
+                  opacity: loading || !filteredEmployees.length ? 0.5 : 1,
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading && filteredEmployees.length) {
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(88,211,77,0.3)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               >
                 ⬇ Export to Excel
@@ -1095,11 +1135,20 @@ export default function MonthlyHrPage() {
                 style={{
                   width: 32,
                   borderRadius: 999,
-                  border: '1px solid rgba(191,219,254,0.9)',
-                  backgroundColor: 'rgba(15,23,42,0.25)',
-                  color: '#e5f0ff',
+                  border: '1px solid rgba(88,211,77,0.4)', // Logo green border
+                  background: 'linear-gradient(135deg, #0c225c, #58D34D)', // Logo green-blue gradient
+                  color: '#ffffff',
                   fontSize: 14,
                   cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(88,211,77,0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
                 title="Export settings"
               >
@@ -1212,8 +1261,8 @@ export default function MonthlyHrPage() {
                     width: 16,
                     height: 16,
                     borderRadius: '999px',
-                    border: '2px solid rgba(191,219,254,0.7)',
-                    borderTopColor: '#022c22',
+                    border: '2px solid rgba(88,211,77,0.3)', // Logo green
+                    borderTopColor: '#58D34D', // Logo green
                     animation: 'spin 0.7s linear infinite',
                   }}
                 />
@@ -1227,8 +1276,9 @@ export default function MonthlyHrPage() {
         <div
           style={{
             borderRadius: 16,
-            backgroundColor: '#c3ddfbff',
-            boxShadow: '0 18px 40px rgba(15,23,42,0.55)',
+            backgroundColor: '#e8f5e9', // Light green tint (logo green)
+            background: 'linear-gradient(135deg, #e8f5e9, #e3f2fd)', // Green-blue gradient
+            boxShadow: '0 18px 40px rgba(12,34,92,0.25)', // Logo blue shadow
             padding: '18px 20px 20px',
           }}
         >
@@ -1321,6 +1371,47 @@ export default function MonthlyHrPage() {
                 </div>
               </div>
 
+              {/* Shift filter */}
+              <div style={{ minWidth: 200 }}>
+                <label
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'block',
+                    marginBottom: 4,
+                    color: '#111827',
+                  }}
+                >
+                  Filter by Shift
+                </label>
+                <select
+                  value={selectedShift}
+                  onChange={(e) => setSelectedShift(e.target.value)}
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5f5',
+                    backgroundColor: '#ffffff',
+                    color: '#0f172a',
+                    fontSize: 13,
+                    outline: 'none',
+                    width: '100%',
+                  }}
+                >
+                  <option value="">All Shifts</option>
+                    <option value="">All Shifts</option>
+                    {shifts.length > 0 ? (
+                      shifts.map((shift) => (
+                        <option key={shift._id} value={shift.code}>
+                          {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No shifts available</option>
+                    )}
+                </select>
+              </div>
+
               <div
                 className="monthly-shift-totals"
                 style={{
@@ -1332,11 +1423,16 @@ export default function MonthlyHrPage() {
                 }}
               >
                 <span>
-                  D1: <strong>{totalsByShift.D1 ?? 0}</strong> &nbsp;|&nbsp; D2:{' '}
-                  <strong>{totalsByShift.D2 ?? 0}</strong> &nbsp;|&nbsp; D3:{' '}
-                  <strong>{totalsByShift.D3 ?? 0}</strong> &nbsp;|&nbsp; S1:{' '}
-                  <strong>{totalsByShift.S1 ?? 0}</strong> &nbsp;|&nbsp; S2:{' '}
-                  <strong>{totalsByShift.S2 ?? 0}</strong>
+                  {shifts.length > 0 ? (
+                    shifts.map((shift, idx) => (
+                      <span key={shift._id}>
+                        {idx > 0 && ' | '}
+                        {shift.code}: <strong>{totalsByShift[shift.code] ?? 0}</strong>
+                      </span>
+                    ))
+                  ) : (
+                    <span>No shifts configured</span>
+                  )}
                 </span>
                 <span className="monthly-legend-text">
                   <span style={{ color: '#16a34a', fontWeight: 600 }}>Green</span>{' '}

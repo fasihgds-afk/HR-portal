@@ -331,7 +331,7 @@ function LoginInner() {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => router.push("/auth/register")}
+                onClick={() => router.push("/register")}
                 style={{
                   marginTop: 10,
                   padding: "8px 16px",
