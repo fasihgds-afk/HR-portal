@@ -33,12 +33,15 @@ const ShiftAttendanceSchema = new mongoose.Schema(
   }
 );
 
-// ✅ ADD THESE INDEXES
+// ✅ ADD THESE INDEXES FOR PERFORMANCE
 // For finding all records of a date quickly (cached path)
 ShiftAttendanceSchema.index({ date: 1 });
 
 // For upserting by (date + empCode + shift) in bulkWrite
 ShiftAttendanceSchema.index({ date: 1, empCode: 1, shift: 1 });
+
+// For monthly attendance queries (date range + empCode)
+ShiftAttendanceSchema.index({ date: 1, empCode: 1 });
 
 
 

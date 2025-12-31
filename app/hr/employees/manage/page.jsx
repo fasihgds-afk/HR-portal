@@ -41,6 +41,7 @@ export default function EmployeeShiftPage() {
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState(null);
+  const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
 
   const [toast, setToast] = useState({ type: '', text: '' });
 
@@ -55,7 +56,7 @@ export default function EmployeeShiftPage() {
     name: '',
     email: '',
     monthlySalary: '',
-    shift: 'D1',
+    shift: '',
     department: '',
     designation: '',
     phoneNumber: '',
@@ -130,7 +131,7 @@ export default function EmployeeShiftPage() {
           name: emp.name,
           email: emp.email,
           monthlySalary: emp.monthlySalary,
-          shift: emp.shift || 'D1',
+          shift: emp.shift || '',
           department: emp.department,
           designation: emp.designation,
           phoneNumber: emp.phoneNumber,
@@ -187,7 +188,7 @@ export default function EmployeeShiftPage() {
           newEmp.monthlySalary !== ''
             ? Number(newEmp.monthlySalary)
             : undefined,
-        shift: newEmp.shift || 'D1',
+        shift: newEmp.shift || '',
         department: newEmp.department || undefined,
         designation: newEmp.designation || undefined,
         phoneNumber: newEmp.phoneNumber || undefined,
@@ -231,7 +232,7 @@ export default function EmployeeShiftPage() {
         name: '',
         email: '',
         monthlySalary: '',
-        shift: 'D1',
+        shift: '',
         department: '',
         designation: '',
         phoneNumber: '',
@@ -321,7 +322,7 @@ export default function EmployeeShiftPage() {
       email: emp.email || '',
       monthlySalary:
         emp.monthlySalary != null ? String(emp.monthlySalary) : '',
-      shift: emp.shift || 'D1',
+      shift: emp.shift || '',
       department: emp.department || '',
       designation: emp.designation || '',
       phoneNumber: emp.phoneNumber || '',
@@ -380,7 +381,7 @@ export default function EmployeeShiftPage() {
             modalEmp.monthlySalary !== ''
               ? Number(modalEmp.monthlySalary)
               : undefined,
-          shift: modalEmp.shift || 'D1',
+          shift: modalEmp.shift || '',
           department: modalEmp.department,
           designation: modalEmp.designation,
           phoneNumber: modalEmp.phoneNumber,
@@ -465,15 +466,93 @@ export default function EmployeeShiftPage() {
   // ------------------------------------------------------------------------
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        padding: '24px 28px 32px',
-        background:
-          'radial-gradient(circle at top, #0b2344 0, #0a1b32 35%, #061523 100%)',
-        color: '#0f172a',
-      }}
-    >
+    <>
+      <style jsx>{`
+        @media (max-width: 768px) {
+          .manage-container {
+            padding: 16px !important;
+          }
+          .manage-header {
+            flex-direction: column !important;
+            gap: 16px !important;
+            align-items: flex-start !important;
+          }
+          .manage-header-logo {
+            width: 40px !important;
+            height: 40px !important;
+          }
+          .manage-header-title {
+            font-size: 18px !important;
+          }
+          .manage-header-buttons {
+            flex-direction: column !important;
+            width: 100% !important;
+            gap: 8px !important;
+          }
+          .manage-header-buttons button {
+            width: 100% !important;
+          }
+          .manage-table-wrapper {
+            overflow-x: auto !important;
+            margin-left: -16px !important;
+            margin-right: -16px !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+          }
+          .manage-table {
+            min-width: 1000px !important;
+            font-size: 12px !important;
+          }
+          .manage-table th,
+          .manage-table td {
+            padding: 8px 6px !important;
+            font-size: 12px !important;
+          }
+          .manage-modal {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            padding: 20px 16px !important;
+          }
+          .manage-form-grid {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+          .manage-form-row {
+            flex-direction: column !important;
+            gap: 12px !important;
+          }
+          .manage-form-row > div {
+            width: 100% !important;
+            min-width: auto !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .manage-container {
+            padding: 12px !important;
+          }
+          .manage-header-title {
+            font-size: 16px !important;
+          }
+          .manage-table {
+            min-width: 900px !important;
+            font-size: 11px !important;
+          }
+        }
+      `}</style>
+      <div
+        className="manage-container"
+        style={{
+          minHeight: '100vh',
+          padding: '24px 28px 32px',
+          background:
+            'radial-gradient(circle at top, #0b2344 0, #0a1b32 35%, #061523 100%)',
+          color: '#0f172a',
+        }}
+      >
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -502,6 +581,7 @@ export default function EmployeeShiftPage() {
       >
         {/* Top bar with logo */}
         <div
+          className="manage-header"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -517,6 +597,7 @@ export default function EmployeeShiftPage() {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div
+              className="manage-header-logo"
               style={{
                 width: 42,
                 height: 42,
@@ -627,12 +708,7 @@ export default function EmployeeShiftPage() {
                 marginBottom: 12,
               }}
             >
-              HR can create a new employee or update an existing one. Shift
-              options:&nbsp;
-              <strong>D1</strong> (09:00–18:00),&nbsp;
-              <strong>D2</strong> (15:00–24:00),&nbsp;
-              <strong>S1</strong> (18:00–03:00),&nbsp;
-              <strong>S2</strong> (21:00–06:00).
+              HR can create a new employee or update an existing one. Select a shift from the dropdown.
             </p>
 
             <div
@@ -783,6 +859,7 @@ export default function EmployeeShiftPage() {
                   value={newEmp.shift}
                   onChange={(e) => handleNewEmpChange('shift', e.target.value)}
                 >
+                  <option value="">Select Shift</option>
                   {shifts.length > 0 ? (
                     shifts.map((shift) => (
                       <option key={shift._id} value={shift.code}>
@@ -790,13 +867,7 @@ export default function EmployeeShiftPage() {
                       </option>
                     ))
                   ) : (
-                    <>
-                      <option value="D1">D1 – Shift 1 (09–18)</option>
-                      <option value="D2">D2 – Shift 2 (15–24)</option>
-                      <option value="D3">D3 – Shift 5 (12–21)</option>
-                      <option value="S1">S1 – Shift 3 (18–03)</option>
-                      <option value="S2">S2 – Shift 4 (21–06)</option>
-                    </>
+                    <option value="" disabled>No shifts available. Please create shifts first.</option>
                   )}
                 </select>
               </div>
@@ -839,6 +910,8 @@ export default function EmployeeShiftPage() {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 marginBottom: 8,
+                gap: 12,
+                flexWrap: 'wrap',
               }}
             >
               <div>
@@ -862,6 +935,30 @@ export default function EmployeeShiftPage() {
                   <span style={{ color: '#0f766e' }}>Edit</span> to open full
                   details.
                 </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label
+                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
+                >
+                  Filter by Shift
+                </label>
+                <select
+                  style={selectStyle}
+                  value={selectedShift}
+                  onChange={(e) => setSelectedShift(e.target.value)}
+                >
+                  <option value="">All Shifts</option>
+                  <option value="">Select Shift</option>
+                  {shifts.length > 0 ? (
+                    shifts.map((shift) => (
+                      <option key={shift._id} value={shift.code}>
+                        {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="" disabled>No shifts available. Please create shifts first.</option>
+                  )}
+                </select>
               </div>
             </div>
 
@@ -909,7 +1006,9 @@ export default function EmployeeShiftPage() {
                       </td>
                     </tr>
                   ) : (
-                    employees.map((emp, idx) => (
+                    employees
+                      .filter((emp) => !selectedShift || emp.shift === selectedShift)
+                      .map((emp, idx) => (
                       <tr
                         key={emp._id || emp.empCode}
                         onDoubleClick={() => openEditModal(emp)}
@@ -935,12 +1034,13 @@ export default function EmployeeShiftPage() {
                         <td style={tdStyle}>
                           <select
                             style={selectStyle}
-                            value={emp.shift || 'D1'}
+                            value={emp.shift || ''}
                             onChange={(e) =>
                               handleShiftChange(idx, e.target.value)
                             }
                             onClick={(e) => e.stopPropagation()}
                           >
+                            <option value="">Select Shift</option>
                             {shifts.length > 0 ? (
                               shifts.map((shift) => (
                                 <option key={shift._id} value={shift.code}>
@@ -948,13 +1048,7 @@ export default function EmployeeShiftPage() {
                                 </option>
                               ))
                             ) : (
-                              <>
-                                <option value="D1">D1 – Day (09–18)</option>
-                                <option value="D2">D2 – Day 2 (15–24)</option>
-                                <option value="D3">D3 – Shift 5 (12–21)</option>
-                                <option value="S1">S1 – Night 1 (18–03)</option>
-                                <option value="S2">S2 – Night 2 (21–06)</option>
-                              </>
+                              <option value="" disabled>No shifts available. Please create shifts first.</option>
                             )}
                           </select>
                         </td>
@@ -1310,6 +1404,7 @@ export default function EmployeeShiftPage() {
                       }))
                     }
                   >
+                    <option value="">Select Shift</option>
                     {shifts.length > 0 ? (
                       shifts.map((shift) => (
                         <option key={shift._id} value={shift.code}>
@@ -1317,13 +1412,7 @@ export default function EmployeeShiftPage() {
                         </option>
                       ))
                     ) : (
-                      <>
-                        <option value="D1">D1 – Day (09–18)</option>
-                        <option value="D2">D2 – Day 2 (15–24)</option>
-                        <option value="D3">D3 – Shift 5 (12–21)</option>
-                        <option value="S1">S1 – Night 1 (18–03)</option>
-                        <option value="S2">S2 – Night 2 (21–06)</option>
-                      </>
+                      <option value="" disabled>No shifts available. Please create shifts first.</option>
                     )}
                   </select>
                 </div>
@@ -1474,5 +1563,6 @@ export default function EmployeeShiftPage() {
         </div>
       )}
     </div>
+    </>
   );
 }

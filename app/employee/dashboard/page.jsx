@@ -409,6 +409,7 @@ export default function EmployeeDashboardPage() {
   // -------------- UI ------------------
   return (
     <div
+      className="employee-dashboard-container"
       style={{
         minHeight: "100vh",
         padding: "26px 30px 36px",
@@ -418,9 +419,110 @@ export default function EmployeeDashboardPage() {
           'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       }}
     >
+      <style jsx>{`
+        @media (max-width: 768px) {
+          .employee-dashboard-container {
+            padding: 16px !important;
+          }
+          .employee-header {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+            padding: 16px !important;
+          }
+          .employee-header-left {
+            width: 100% !important;
+          }
+          .employee-header-logo {
+            width: 60px !important;
+            height: 60px !important;
+          }
+          .employee-header-title {
+            font-size: 18px !important;
+          }
+          .employee-header-subtitle {
+            font-size: 11px !important;
+          }
+          .employee-header-right {
+            width: 100% !important;
+            flex-direction: column !important;
+            gap: 12px !important;
+          }
+          .employee-header-right > div {
+            width: 100% !important;
+          }
+          .employee-header-right input {
+            width: 100% !important;
+            min-width: auto !important;
+          }
+          .employee-header-right button {
+            width: 100% !important;
+          }
+          .employee-main-card {
+            padding: 16px !important;
+          }
+          .employee-top-row {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+          .employee-profile-card {
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+          }
+          .employee-profile-avatar {
+            margin-bottom: 12px !important;
+          }
+          .employee-bottom-row {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+          .employee-summary-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 8px !important;
+          }
+          .employee-table-wrapper {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+          }
+          .employee-table {
+            min-width: 500px !important;
+            font-size: 11px !important;
+          }
+          .employee-table th,
+          .employee-table td {
+            padding: 6px 4px !important;
+            font-size: 11px !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .employee-dashboard-container {
+            padding: 12px !important;
+          }
+          .employee-header-title {
+            font-size: 16px !important;
+          }
+          .employee-main-card {
+            padding: 12px !important;
+          }
+          .employee-summary-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .employee-table {
+            min-width: 450px !important;
+            font-size: 10px !important;
+          }
+          .employee-table th,
+          .employee-table td {
+            padding: 4px 3px !important;
+            font-size: 10px !important;
+          }
+        }
+      `}</style>
       <div style={{ maxWidth: 1280, margin: "0 auto 22px auto" }}>
         {/* HEADER */}
         <div
+          className="employee-header"
           style={{
             display: "flex",
             alignItems: "center",
@@ -432,8 +534,9 @@ export default function EmployeeDashboardPage() {
             boxShadow: "0 20px 45px rgba(0,0,0,0.25)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="employee-header-left" style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
+              className="employee-header-logo"
               style={{
                 width: 86,
                 height: 86,
@@ -462,6 +565,7 @@ export default function EmployeeDashboardPage() {
             </div>
             <div>
               <div
+                className="employee-header-title"
                 style={{
                   fontSize: 24,
                   fontWeight: 800,
@@ -471,6 +575,7 @@ export default function EmployeeDashboardPage() {
                 Global Digital Solutions Attendance Portal
               </div>
               <div
+                className="employee-header-subtitle"
                 style={{
                   fontSize: 13,
                   opacity: 0.9,
@@ -492,7 +597,7 @@ export default function EmployeeDashboardPage() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div className="employee-header-right" style={{ display: "flex", gap: 16, alignItems: "center" }}>
             <div>
               <label
                 style={{
@@ -545,6 +650,7 @@ export default function EmployeeDashboardPage() {
 
       {/* MAIN CARD */}
       <div
+        className="employee-main-card"
         style={{
           maxWidth: 1280,
           margin: "0 auto",
@@ -573,6 +679,7 @@ export default function EmployeeDashboardPage() {
 
         {/* TOP ROW */}
         <div
+          className="employee-top-row"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 1.5fr)",
@@ -582,6 +689,7 @@ export default function EmployeeDashboardPage() {
         >
           {/* PROFILE CARD */}
           <div
+            className="employee-profile-card"
             style={{
               borderRadius: 18,
               padding: "14px 16px",
@@ -591,7 +699,7 @@ export default function EmployeeDashboardPage() {
               gap: 14,
             }}
           >
-            <div style={{ flexShrink: 0 }}>
+            <div className="employee-profile-avatar" style={{ flexShrink: 0 }}>
               {renderEmployeeAvatar(avatarSource, 88)}
             </div>
             <div>
@@ -730,6 +838,7 @@ export default function EmployeeDashboardPage() {
 
         {/* BOTTOM ROW */}
         <div
+          className="employee-bottom-row"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 2.1fr)",
@@ -767,6 +876,7 @@ export default function EmployeeDashboardPage() {
             ) : (
               <>
                 <div
+                  className="employee-summary-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(3,minmax(0,1fr))",
@@ -865,18 +975,22 @@ export default function EmployeeDashboardPage() {
               Day-by-day attendance
             </div>
             <div
+              className="employee-table-wrapper"
               style={{
                 maxHeight: "440px",
                 overflowY: "auto",
+                overflowX: "auto",
                 borderRadius: 12,
                 border: "1px solid rgba(31,41,55,0.95)",
               }}
             >
               <table
+                className="employee-table"
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
                   fontSize: 11.5,
+                  minWidth: 500,
                 }}
               >
                 <thead>

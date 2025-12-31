@@ -7,18 +7,19 @@ export async function GET() {
     // connect to Mongo
     await connectDB();
 
-    // fetch all employees (you can add filters later)
-    const employees = await Employee.find({}).lean();
+    // PERFORMANCE: Select only needed fields (exclude large base64 images)
+    const employees = await Employee.find({})
+      .select('empCode name email monthlySalary shift shiftId department designation phoneNumber cnic profileImageUrl saturdayGroup')
+      .lean()
+      .sort({ department: 1, empCode: 1 }); // Sort in database instead of in-memory
 
-    // optional: sort by department + empCode
-    employees.sort((a, b) => {
-      const deptA = (a.department || "").toLowerCase();
-      const deptB = (b.department || "").toLowerCase();
-      if (deptA !== deptB) return deptA.localeCompare(deptB);
-      return String(a.empCode).localeCompare(String(b.empCode));
+    // Add cache headers for better performance (5 minutes cache)
+    return Response.json({ employees }, { 
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+      },
     });
-
-    return Response.json({ employees }, { status: 200 });
   } catch (err) {
     console.error("GET /api/hr/employees error:", err);
     return Response.json(

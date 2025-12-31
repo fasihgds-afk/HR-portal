@@ -1,4 +1,4 @@
-// next-app/app/auth/register/page.jsx
+// next-app/app/register/page.jsx
 'use client';
 
 import { useState } from 'react';
@@ -12,6 +12,7 @@ export default function RegisterPage() {
   const [password2, setPassword2] = useState('');
   const [role, setRole] = useState('HR'); // 'HR' | 'EMPLOYEE'
   const [empCode, setEmpCode] = useState('');
+  const [secretKey, setSecretKey] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -32,6 +33,11 @@ export default function RegisterPage() {
       return;
     }
 
+    if (role === 'HR' && !secretKey.trim()) {
+      setErrorMsg('Secret key is required for HR role');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -42,6 +48,7 @@ export default function RegisterPage() {
           password,
           role,
           empCode: role === 'EMPLOYEE' ? empCode : undefined,
+          secretKey: role === 'HR' ? secretKey : undefined,
         }),
       });
 
@@ -198,7 +205,15 @@ export default function RegisterPage() {
             <label style={{ fontSize: 11, color: '#cbd5e1' }}>Role</label>
             <select
               value={role}
-              onChange={(e) => setRole(e.target.value)}
+              onChange={(e) => {
+                setRole(e.target.value);
+                // Clear role-specific fields when switching
+                if (e.target.value === 'HR') {
+                  setEmpCode('');
+                } else {
+                  setSecretKey('');
+                }
+              }}
               style={{
                 padding: '9px 11px',
                 borderRadius: 8,
@@ -213,6 +228,30 @@ export default function RegisterPage() {
               <option value="EMPLOYEE">Employee (self-service)</option>
             </select>
           </div>
+
+          {/* Secret key (required only when role === HR) */}
+          {role === 'HR' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#cbd5e1' }}>
+                Secret Key
+              </label>
+              <input
+                type="password"
+                value={secretKey}
+                onChange={(e) => setSecretKey(e.target.value)}
+                placeholder="Enter your secret key"
+                style={{
+                  padding: '9px 11px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(148,163,184,0.9)',
+                  backgroundColor: '#020617',
+                  color: '#e5e7eb',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
 
           {/* Employee code (required only when role === EMPLOYEE) */}
           {role === 'EMPLOYEE' && (
@@ -317,3 +356,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+

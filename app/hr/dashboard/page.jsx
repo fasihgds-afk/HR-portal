@@ -1,7 +1,7 @@
-// next-app/app/hr/page.jsx
+// next-app/app/hr/dashboard/page.jsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 
@@ -35,7 +35,7 @@ function formatDateTime(value) {
   });
 }
 
-export default function HrPage() {
+export default function HrDashboardPage() {
   const [businessDate, setBusinessDate] = useState(() => {
     const today = new Date();
     return today.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -44,6 +44,8 @@ export default function HrPage() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [shifts, setShifts] = useState([]);
+  const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
 
   const [toast, setToast] = useState({ type: '', text: '' });
 
@@ -54,6 +56,22 @@ export default function HrPage() {
     }, 2600);
   }
 
+  async function loadShifts() {
+    try {
+      const res = await fetch('/api/hr/shifts?activeOnly=true');
+      if (res.ok) {
+        const data = await res.json();
+        setShifts(data.shifts || []);
+      }
+    } catch (err) {
+      console.error('Failed to load shifts:', err);
+    }
+  }
+
+  useEffect(() => {
+    loadShifts();
+  }, []);
+
   async function handleLoadAndSave() {
     setLoading(true);
     setStatus('');
@@ -61,7 +79,7 @@ export default function HrPage() {
 
     try {
       const res = await fetch(
-        `/api/hr/shift-attendance?date=${businessDate}`,
+        `/api/hr/daily-attendance?date=${businessDate}`,
         { method: 'POST' }
       );
 
@@ -115,24 +133,32 @@ export default function HrPage() {
   // ---------- SEARCH FILTER (table only, stats still use full rows) ----------
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
-  const filteredRows = !normalizedSearch
-    ? rows
-    : rows.filter((r) => {
-        const text = [
-          r.empCode,
-          r.employeeName,
-          r.name,
-          r.department,
-          r.designation,
-          r.shift,
-          r.attendanceStatus,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
+  const filteredRows = rows.filter((r) => {
+    // Shift filter
+    if (selectedShift && r.shift !== selectedShift) {
+      return false;
+    }
+    
+    // Search filter
+    if (normalizedSearch) {
+      const text = [
+        r.empCode,
+        r.employeeName,
+        r.name,
+        r.department,
+        r.designation,
+        r.shift,
+        r.attendanceStatus,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-        return text.includes(normalizedSearch);
-      });
+      return text.includes(normalizedSearch);
+    }
+    
+    return true;
+  });
 
   // ---------- Department ordering & manager / TL on top ----------
 
@@ -445,6 +471,7 @@ export default function HrPage() {
         fontFamily:
           'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       }}
+      className="daily-page-container"
     >
       <style
         dangerouslySetInnerHTML={{
@@ -460,6 +487,98 @@ export default function HrPage() {
           .hr-att-table tbody tr.data-row:hover td {
             background-color: #e0edff;
           }
+          
+          /* Mobile Responsive Styles */
+          @media (max-width: 768px) {
+            .daily-page-container {
+              padding: 16px !important;
+            }
+            .daily-header {
+              flex-direction: column !important;
+              align-items: flex-start !important;
+              gap: 16px !important;
+              padding: 16px !important;
+            }
+            .daily-header-logo {
+              width: 60px !important;
+              height: 60px !important;
+            }
+            .daily-header-title {
+              font-size: 18px !important;
+            }
+            .daily-controls {
+              flex-direction: column !important;
+              align-items: stretch !important;
+            }
+            .daily-controls > div {
+              width: 100% !important;
+            }
+            .daily-controls input[type="date"] {
+              width: 100% !important;
+              min-width: auto !important;
+            }
+            .daily-table-wrapper {
+              overflow-x: auto !important;
+              -webkit-overflow-scrolling: touch !important;
+              margin-left: -16px !important;
+              margin-right: -16px !important;
+              padding-left: 16px !important;
+              padding-right: 16px !important;
+            }
+            .daily-table {
+              min-width: 800px !important;
+              font-size: 12px !important;
+            }
+            .daily-table th,
+            .daily-table td {
+              padding: 6px 8px !important;
+            }
+            .daily-main-card {
+              padding: 12px !important;
+            }
+            .daily-legend {
+              font-size: 11px !important;
+              padding: 8px 10px !important;
+            }
+            .daily-stats-strip {
+              flex-direction: column !important;
+              gap: 6px !important;
+            }
+            .daily-stats-strip > div {
+              width: 100% !important;
+            }
+            .daily-search-export {
+              flex-direction: column !important;
+              gap: 10px !important;
+            }
+            .daily-search-export > div {
+              width: 100% !important;
+              min-width: auto !important;
+            }
+            .daily-search-export input {
+              width: 100% !important;
+              min-width: auto !important;
+            }
+            .daily-search-export button {
+              width: 100% !important;
+            }
+          }
+          @media (max-width: 480px) {
+            .daily-page-container {
+              padding: 12px !important;
+            }
+            .daily-header-title {
+              font-size: 16px !important;
+            }
+            .daily-table {
+              min-width: 700px !important;
+              font-size: 11px !important;
+            }
+            .daily-table th,
+            .daily-table td {
+              padding: 4px 6px !important;
+            }
+          }
         `,
         }}
       />
@@ -467,6 +586,7 @@ export default function HrPage() {
       <div style={{ maxWidth: 1400, margin: '0 auto' }}>
         {/* Brand header bar with logo */}
         <div
+          className="daily-header"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -482,6 +602,7 @@ export default function HrPage() {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             <div
+              className="daily-header-logo"
               style={{
                 width: 90,
                 height: 90,
@@ -509,6 +630,7 @@ export default function HrPage() {
 
             <div>
               <div
+                className="daily-header-title"
                 style={{
                   fontSize: 22,
                   fontWeight: 800,
@@ -583,6 +705,7 @@ export default function HrPage() {
 
         {/* MAIN CARD */}
         <div
+          className="daily-main-card"
           style={{
             borderRadius: 14,
             backgroundColor: '#f3f6fb',
@@ -594,6 +717,7 @@ export default function HrPage() {
           <div style={{ marginBottom: 14 }}>
             {/* Shift legend */}
             <div
+              className="daily-legend"
               style={{
                 marginBottom: 14,
                 padding: '10px 12px',
@@ -609,15 +733,21 @@ export default function HrPage() {
             >
               <strong style={{ color: '#ffffffff' }}>Shift Legend:</strong>
               <span>
-                <strong>Shift 1</strong> = Day (09:00–18:00),{' '}
-                <strong>Shift 2</strong> = Day (15:00–24:00),{' '}
-                <strong>Shift 5</strong> = Day (12:00–21:00),{' '}
-                <strong>Shift 3</strong> = Night (18:00–03:00),{' '}
-                <strong>Shift 4</strong> = Night (21:00–06:00)
+                {shifts.length > 0 ? (
+                  shifts.map((shift, idx) => (
+                    <span key={shift._id}>
+                      {idx > 0 && ', '}
+                      <strong>{shift.code}</strong> = {shift.name} ({shift.startTime}–{shift.endTime})
+                    </span>
+                  ))
+                ) : (
+                  <span>No shifts configured. Please create shifts first.</span>
+                )}
               </span>
             </div>
 
             <div
+              className="daily-controls"
               style={{
                 display: 'flex',
                 flexWrap: 'wrap',
@@ -656,6 +786,46 @@ export default function HrPage() {
                   />
                 </div>
 
+                <div>
+                  <label
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      display: 'block',
+                      marginBottom: 4,
+                      color: '#111827',
+                    }}
+                  >
+                    Filter by Shift
+                  </label>
+                  <select
+                    value={selectedShift}
+                    onChange={(e) => setSelectedShift(e.target.value)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5f5',
+                      backgroundColor: '#ffffff',
+                      color: '#0f172a',
+                      minWidth: 200,
+                      fontSize: 13,
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="">All Shifts</option>
+                    <option value="">All Shifts</option>
+                    {shifts.length > 0 ? (
+                      shifts.map((shift) => (
+                        <option key={shift._id} value={shift.code}>
+                          {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No shifts available</option>
+                    )}
+                  </select>
+                </div>
+
                 <div
                   style={{
                     display: 'flex',
@@ -666,11 +836,16 @@ export default function HrPage() {
                   }}
                 >
                   <span>
-                    Shift 1: <strong>{totals.D1 ?? 0}</strong> | Shift 2:{' '}
-                    <strong>{totals.D2 ?? 0}</strong> | Shift 5:{' '}
-                    <strong>{totals.D3 ?? 0}</strong> | Shift 3:{' '}
-                    <strong>{totals.S1 ?? 0}</strong> | Shift 4:{' '}
-                    <strong>{totals.S2 ?? 0}</strong>
+                    {shifts.length > 0 ? (
+                      shifts.map((shift, idx) => (
+                        <span key={shift._id}>
+                          {idx > 0 && ' | '}
+                          {shift.code}: <strong>{totals[shift.code] ?? 0}</strong>
+                        </span>
+                      ))
+                    ) : (
+                      <span>No shifts configured</span>
+                    )}
                   </span>
                   {status && (
                     <span style={{ color: '#065f46' }}>{status}</span>
@@ -790,6 +965,7 @@ export default function HrPage() {
 
               {/* search + export */}
               <div
+                className="daily-search-export"
                 style={{
                   display: 'flex',
                   gap: 10,
@@ -854,9 +1030,9 @@ export default function HrPage() {
               </div>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
+            <div className="daily-table-wrapper" style={{ overflowX: 'auto' }}>
               <table
-                className="hr-att-table"
+                className="hr-att-table daily-table"
                 style={{
                   width: '100%',
                   minWidth: 900,
@@ -1027,3 +1203,4 @@ export default function HrPage() {
     </div>
   );
 }
+
