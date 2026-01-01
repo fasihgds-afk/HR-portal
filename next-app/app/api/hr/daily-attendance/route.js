@@ -11,9 +11,15 @@ export const dynamic = 'force-dynamic'; // avoid caching in dev
 
 /**
  * Classify a punch time to a shift code using dynamic shifts from database
- * @param {Date} localDate - The punch time
+ * 
+ * TIMEZONE HANDLING:
+ * - Sync service stores eventTime as Date object with timezone from TIMEZONE_OFFSET env
+ * - This function receives the Date object and compares it against shift timings
+ * - All time comparisons are done in local timezone (matching sync service)
+ * 
+ * @param {Date} localDate - The punch time (Date object from MongoDB, already in correct timezone)
  * @param {String} businessDateStr - Business date in YYYY-MM-DD format
- * @param {String} tzOffset - Timezone offset
+ * @param {String} tzOffset - Timezone offset (e.g., "+05:00") - used for reference
  * @param {Array} shifts - Array of shift objects from database
  * @returns {String|null} - Shift code or null if no match
  */
@@ -136,53 +142,28 @@ export async function POST(req) {
     }
 
     /**
-     * Calculate business day window based on dynamic shifts
-     * Find earliest start time and latest end time (considering midnight crossing)
+     * Calculate business day window - ALIGNED WITH SYNC SERVICE
+     * Sync service fetches: 09:00 (same day) -> 08:00 (next day)
+     * This ensures all events from all shifts (3 day + 2 night) are captured correctly
+     * 
+     * Business day concept:
+     * - Day shifts (D1, D2, D3): Start and end on same day
+     * - Night shifts (N1, N2): Start on business date, end on next day
+     * - All shifts are covered by the 09:00 -> 08:00 next day window
      */
-    let earliestStart = 24 * 60; // Start with max value
-    let latestEnd = 0; // Start with min value
-    
-    for (const shift of allShifts) {
-      const [startH, startM] = shift.startTime.split(':').map(Number);
-      const startMin = startH * 60 + startM;
-      
-      let [endH, endM] = shift.endTime.split(':').map(Number);
-      let endMin = endH * 60 + endM;
-      
-      if (shift.crossesMidnight) {
-        endMin += 24 * 60; // Add 24 hours for next day
-      }
-      
-      if (startMin < earliestStart) earliestStart = startMin;
-      if (endMin > latestEnd) latestEnd = endMin;
-    }
-    
-    // Convert back to hours for date calculation
-    const startHour = Math.floor(earliestStart / 60);
-    const startMinute = earliestStart % 60;
-    const endHour = Math.floor(latestEnd / 60);
-    const endMinute = latestEnd % 60;
-    
     const pad = (n) => String(n).padStart(2, '0');
-    const startLocal = new Date(`${date}T${pad(startHour)}:${pad(startMinute)}:00${TZ}`);
     
-    // Calculate end time - handle midnight crossing properly
-    let endLocal;
-    if (latestEnd >= 24 * 60) {
-      // End time is on the next day (e.g., latestEnd = 1620 means 03:00 next day)
-      const endHourNormalized = Math.floor((latestEnd % (24 * 60)) / 60);
-      const endMinuteNormalized = latestEnd % 60;
-      // Get next day date string (YYYY-MM-DD)
-      const nextDay = new Date(startLocal);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const nextDayStr = nextDay.getFullYear() + '-' + 
-                         pad(nextDay.getMonth() + 1) + '-' + 
-                         pad(nextDay.getDate());
-      endLocal = new Date(`${nextDayStr}T${pad(endHourNormalized)}:${pad(endMinuteNormalized)}:00${TZ}`);
-    } else {
-      // End time is on the same day
-      endLocal = new Date(`${date}T${pad(endHour)}:${pad(endMinute)}:00${TZ}`);
-    }
+    // Business day window: 09:00 (same day) -> 08:00 (next day)
+    // This matches the sync service's getBusinessRange() function
+    const startLocal = new Date(`${date}T09:00:00${TZ}`);
+    
+    // Calculate next day for end time (08:00 next day)
+    const nextDay = new Date(startLocal);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextDayStr = nextDay.getFullYear() + '-' + 
+                       pad(nextDay.getMonth() + 1) + '-' + 
+                       pad(nextDay.getDate());
+    const endLocal = new Date(`${nextDayStr}T08:00:00${TZ}`);
 
     // Load existing ShiftAttendance records for this date (to preserve saved checkOut times)
     const existingRecords = await ShiftAttendance.find({
@@ -220,11 +201,20 @@ export async function POST(req) {
       }
     }
 
-    // Fetch all successful access events in the window
+    // Fetch all successful access events in the business day window
+    // Window: 09:00 (business date) -> 08:00 (next day)
+    // This matches the sync service's business day window to ensure all events are captured
+    // Sync service: getBusinessRange() fetches 09:00 -> 08:00 next day
+    console.log(`📅 Fetching events for business day ${date} from ${startLocal.toISOString()} to ${endLocal.toISOString()}`);
+    
     const events = await AttendanceEvent.find({
       eventTime: { $gte: startLocal, $lte: endLocal },
       minor: 38, // "valid access" events only
-    }).lean();
+    })
+    .sort({ eventTime: 1 }) // Sort by time ascending for proper processing
+    .lean();
+
+    console.log(`📥 Found ${events.length} events in business day window for ${date}`);
 
     // Group punches by employee (only those who have events)
     const byEmp = new Map();
@@ -232,6 +222,8 @@ export async function POST(req) {
     for (const ev of events) {
       if (!ev.empCode) continue;
 
+      // eventTime is stored as UTC Date in MongoDB (from sync service)
+      // The sync service stores it correctly with timezone, so we can use it directly
       const local = new Date(ev.eventTime);
       const timeShift = classifyByTime(local, date, TZ, allShifts); // Dynamic shift code or null
 
@@ -273,15 +265,26 @@ export async function POST(req) {
       }
 
       // Determine checkOut: prefer from events if multiple punches, otherwise use existing record or next day's record
+      // IMPORTANT: For night shifts, checkout can be on next day, so we need to be careful not to use
+      // checkout events from current day (which belong to previous day's shift)
       let checkOut = null;
+      
+      // Get employee's assigned shift to determine if it's a night shift
+      const empAssignedShift = rec?.assignedShift || emp.shift || '';
+      const shiftObjForCheckOut = shiftByCode.get(empAssignedShift);
+      const isNightShiftForCheckOut = shiftObjForCheckOut?.crossesMidnight === true;
+      
       if (times.length > 1) {
-        // Use latest punch from events if we have multiple punches
-        checkOut = times[times.length - 1];
-      } else if (existingRecord && existingRecord.checkOut != null) {
-        // If we have one or zero punches from events, use checkOut from existing record
-        // This handles cases where checkOut event might be outside query window or missing
-        // This is the key fix: even if we found checkIn from events, use existing checkOut
-        // Use != null to check for both null and undefined
+        // For night shifts: checkout is on next day, so don't use latest punch from current day's events
+        // Instead, we'll get checkout from next day's events later in the code
+        if (!isNightShiftForCheckOut) {
+          // Day shifts: checkout is on same day, use latest punch
+          checkOut = times[times.length - 1];
+        }
+        // For night shifts, checkOut will be set later from next day's events
+      } else if (existingRecord && existingRecord.checkOut != null && !isNightShiftForCheckOut) {
+        // For day shifts: use existing checkout if available
+        // For night shifts: don't use existing checkout from current day (it might be from previous shift)
         checkOut = new Date(existingRecord.checkOut);
       }
       
@@ -314,13 +317,23 @@ export async function POST(req) {
           // ====================================================================================
           // NIGHT SHIFT CHECKOUT RETRIEVAL FROM NEXT DAY
           // ====================================================================================
-          // For night shifts that cross midnight: checkOut may be stored on the next day
-          // since the shift ends on the next working day (e.g., Dec 31 shift 21:00-06:00 ends on Jan 1 at 06:00)
+          // For night shifts that cross midnight: checkOut occurs on the next day
+          // Example: N2 shift starting Jan 1 at 21:00 ends on Jan 2 at 06:00
+          // 
+          // DATA SOURCE EXPLANATION:
+          // When viewing Jan 1st, checkout times (06:31:37, 05:48:38, etc.) are retrieved from:
+          // 1. Jan 2nd's ShiftAttendance records (if already saved) - OR
+          // 2. Jan 2nd's AttendanceEvent records (directly from device, 00:00-08:00 window)
+          // 
+          // This checkout time is then DISPLAYED and SAVED to Jan 1st's record because:
+          // - The shift started on Jan 1st, so Jan 1st is the "business date" for this shift
+          // - Even though checkout physically occurs on Jan 2nd, it belongs to Jan 1st's shift
+          // - This allows the complete shift record (checkIn + checkOut) to be viewed on Jan 1st
           // 
           // Strategy:
           // 1. First check next day's ShiftAttendance record (if it exists)
-          // 2. If not found, query AttendanceEvent records directly for next day early morning
-          // 3. Use time-based logic to determine if checkOut belongs to current day's shift
+          // 2. If not found, query AttendanceEvent records directly for next day early morning (00:00-08:00)
+          // 3. Validate using time-based logic to ensure checkOut belongs to current day's shift
           // ====================================================================================
           
           // Try next day's ShiftAttendance record first
@@ -370,56 +383,75 @@ export async function POST(req) {
           }
           
           // If we found a checkOut from next day, validate it belongs to current day's shift
+          // CRITICAL: We must verify the checkOut belongs to the CURRENT business date's shift, not previous day's shift
+          // Example: Dec 31 N2 shift ends Jan 1 at 06:00, but Jan 1 N2 shift starts Jan 1 at 21:00 and ends Jan 2 at 06:00
+          // When viewing Jan 1: We should NOT show Jan 1 checkout at 06:00 (from Dec 31 shift)
+          // We SHOULD show Jan 2 checkout at 06:00 (from Jan 1 shift)
           if (nextDayCheckOut && !isNaN(nextDayCheckOut.getTime())) {
             try {
-              // Convert to local time for comparison
-              const TZ_MS = TZ === '+05:00' ? 5 * 60 * 60 * 1000 : 0;
-              const checkOutLocal = new Date(nextDayCheckOut.getTime() + TZ_MS);
-              const checkOutHour = checkOutLocal.getUTCHours();
-              const checkOutMin = checkOutLocal.getUTCMinutes();
-              const checkOutTotalMin = checkOutHour * 60 + checkOutMin;
+              // Get current time to check if checkOut is in the future
+              const now = new Date();
               
-              // Check if next day has checkIn (from ShiftAttendance record if available)
-              let nextDayHasCheckIn = false;
-              if (nextDayRecord && nextDayRecord.checkIn != null) {
-                try {
-                  const nextCheckIn = new Date(nextDayRecord.checkIn);
-                  if (!isNaN(nextCheckIn.getTime())) {
-                    nextDayHasCheckIn = true;
+              // Only proceed if checkOut time has actually occurred (checkOut <= now)
+              // This prevents showing future checkout times when viewing today's data
+              if (nextDayCheckOut > now) {
+                // CheckOut is in the future - don't show it yet
+                nextDayCheckOut = null;
+              } else if (!checkIn) {
+                // No checkIn for current day - can't verify this checkout belongs to current day's shift
+                nextDayCheckOut = null;
+              } else {
+                // Validate that checkIn is on the CURRENT business date (not previous day)
+                // This ensures checkout belongs to current day's shift, not previous day's shift
+                // Helper function to convert Date to local date string (YYYY-MM-DD) using timezone offset
+                const getLocalDateStr = (dateObj, tzOffset) => {
+                  const tzHours = tzOffset === '+05:00' ? 5 : parseInt(tzOffset.split(':')[0]);
+                  const utcTime = dateObj.getTime();
+                  const localTime = utcTime + (tzHours * 60 * 60 * 1000);
+                  const localDate = new Date(localTime);
+                  const year = localDate.getUTCFullYear();
+                  const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(localDate.getUTCDate()).padStart(2, '0');
+                  return `${year}-${month}-${day}`;
+                };
+                
+                const checkInDateStr = getLocalDateStr(checkIn, TZ);
+                const businessDateStr = date; // YYYY-MM-DD format
+                
+                if (checkInDateStr !== businessDateStr) {
+                  // CheckIn is NOT on the business date - this checkout doesn't belong to current day's shift
+                  // Example: Viewing Jan 1, but checkIn is Dec 31 - this checkout is from Dec 31's shift
+                  nextDayCheckOut = null;
+                } else {
+                  // CheckIn is on the business date - validate checkout timing
+                  // Get checkout time components in local timezone
+                  const tzHours = TZ === '+05:00' ? 5 : parseInt(TZ.split(':')[0]);
+                  const checkOutLocalTime = nextDayCheckOut.getTime() + (tzHours * 60 * 60 * 1000);
+                  const checkOutLocalDate = new Date(checkOutLocalTime);
+                  const checkOutHour = checkOutLocalDate.getUTCHours();
+                  const checkOutMin = checkOutLocalDate.getUTCMinutes();
+                  const checkOutTotalMin = checkOutHour * 60 + checkOutMin;
+                  
+                  // Verify checkout is on the NEXT day (not same day as checkIn)
+                  const checkOutDateStr = getLocalDateStr(nextDayCheckOut, TZ);
+                  const nextDayStr = nextDateStr; // Already calculated above (YYYY-MM-DD format)
+                  
+                  if (checkOutDateStr !== nextDayStr) {
+                    // Checkout is NOT on the next day - this is wrong for night shifts
+                    nextDayCheckOut = null;
+                  } else if (checkOutTotalMin >= 480) {
+                    // Checkout is after 08:00 - too late to be from previous night shift
+                    nextDayCheckOut = null;
+                  } else {
+                    // Checkout is on next day, before 08:00, and checkIn is on business date
+                    // This checkout belongs to current day's night shift (N1 ends at 03:00, N2 ends at 06:00)
+                    checkOut = nextDayCheckOut;
                   }
-                } catch (e) {
-                  // Ignore errors
-                }
-              }
-              
-              // Logic to determine if next day's checkOut belongs to current day's night shift:
-              // 1. If checkOut is before 08:00 → belongs to previous day's night shift (most common case)
-              // 2. If next day has no checkIn → checkOut definitely belongs to previous day
-              // 3. If next day has checkIn in evening (>= 18:00) and checkOut is before 08:00 → checkOut belongs to previous day
-              if (checkOutTotalMin < 480 || !nextDayHasCheckIn) {
-                // Case 1 & 2: checkOut before 08:00 OR no checkIn on next day
-                checkOut = nextDayCheckOut;
-              } else if (nextDayHasCheckIn) {
-                // Case 3: Check if next day's checkIn is in evening (new shift started)
-                try {
-                  const nextCheckIn = new Date(nextDayRecord.checkIn);
-                  if (!isNaN(nextCheckIn.getTime())) {
-                    const checkInLocal = new Date(nextCheckIn.getTime() + TZ_MS);
-                    const checkInHour = checkInLocal.getUTCHours();
-                    
-                    // If checkOut is before 08:00 and checkIn is after 18:00 (evening),
-                    // then checkOut belongs to previous day's night shift
-                    // (The checkIn at 18:00+ indicates a new shift started, so checkOut is from previous shift)
-                    if (checkOutTotalMin < 480 && checkInHour >= 18) {
-                      checkOut = nextDayCheckOut;
-                    }
-                  }
-                } catch (e) {
-                  // Ignore errors
                 }
               }
             } catch (e) {
               // Ignore errors
+              nextDayCheckOut = null;
             }
           }
         }
