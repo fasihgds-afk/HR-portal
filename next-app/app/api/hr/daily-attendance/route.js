@@ -561,19 +561,40 @@ export async function POST(req) {
                   const checkOutMin = checkOutLocalTime.getUTCMinutes();
                   const checkOutTotalMin = checkOutHour * 60 + checkOutMin;
                   
-                  // Verify checkout is on next day and before 08:00
-                  if (checkOutDateStr !== nextDateStr) {
-                    // Checkout is NOT on the next day
-                    console.log(`[N1 DEBUG] Rejected checkout (not on next day): empCode=${emp.empCode}, nextDateStr=${nextDateStr}, checkOutDateStr=${checkOutDateStr}, checkout=${nextDayCheckOut.toISOString()}`);
+                  // Calculate expected checkout date: business date + 1 day
+                  const [year, month, day] = date.split('-').map(Number);
+                  const expectedCheckOutDate = new Date(Date.UTC(year, month - 1, day));
+                  expectedCheckOutDate.setUTCDate(expectedCheckOutDate.getUTCDate() + 1);
+                  const expectedCheckOutDateStr = expectedCheckOutDate.getUTCFullYear() + '-' + 
+                                                  String(expectedCheckOutDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                                                  String(expectedCheckOutDate.getUTCDate()).padStart(2, '0');
+                  
+                  // Verify checkout is on or after the expected next day and before 08:00
+                  // We allow checkout to be on expectedNextDay or later (in case of saved records from future dates)
+                  // But we ensure it's before 08:00 to filter out day shift checkouts
+                  const checkOutDateParts = checkOutDateStr.split('-').map(Number);
+                  const expectedDateParts = expectedCheckOutDateStr.split('-').map(Number);
+                  const checkOutDateValue = checkOutDateParts[0] * 10000 + checkOutDateParts[1] * 100 + checkOutDateParts[2];
+                  const expectedDateValue = expectedDateParts[0] * 10000 + expectedDateParts[1] * 100 + expectedDateParts[2];
+                  
+                  if (checkOutDateValue < expectedDateValue) {
+                    // Checkout is before the expected next day - this belongs to a previous shift
+                    console.log(`[N1 DEBUG] Rejected checkout (before expected next day): empCode=${emp.empCode}, expectedDateStr=${expectedCheckOutDateStr}, checkOutDateStr=${checkOutDateStr}, checkout=${nextDayCheckOut.toISOString()}`);
                     nextDayCheckOut = null;
-                  } else if (checkOutTotalMin >= 480) {
-                    // Checkout is after 08:00 - too late to be from previous night shift
-                    console.log(`[N1 DEBUG] Rejected checkout (after 08:00): empCode=${emp.empCode}, checkOutTotalMin=${checkOutTotalMin}, checkout=${nextDayCheckOut.toISOString()}`);
+                  } else if (checkOutDateValue === expectedDateValue && checkOutTotalMin >= 480) {
+                    // Checkout is on expected next day but after 08:00 - too late to be from previous night shift
+                    console.log(`[N1 DEBUG] Rejected checkout (after 08:00 on expected day): empCode=${emp.empCode}, checkOutTotalMin=${checkOutTotalMin}, checkout=${nextDayCheckOut.toISOString()}`);
+                    nextDayCheckOut = null;
+                  } else if (checkOutDateValue > expectedDateValue && checkOutTotalMin >= 480) {
+                    // Checkout is on a later date and after 08:00 - this is likely from a future shift
+                    // But if it's before 08:00, it could still be from the current shift (edge case: shift extends very late)
+                    // For safety, we'll accept it if it's before 08:00 on the checkout date
+                    console.log(`[N1 DEBUG] Rejected checkout (on later date and after 08:00): empCode=${emp.empCode}, checkOutDateStr=${checkOutDateStr}, checkOutTotalMin=${checkOutTotalMin}, checkout=${nextDayCheckOut.toISOString()}`);
                     nextDayCheckOut = null;
                   } else {
-                    // Checkout is on next day, before 08:00, and checkIn is on business date
+                    // Checkout is on or after expected next day, and timing is valid
                     // This checkout belongs to current day's night shift (N1 ends at 03:00, N2 ends at 06:00)
-                    console.log(`[N1 DEBUG] ACCEPTED checkout: empCode=${emp.empCode}, date=${date}, checkIn=${checkIn.toISOString()}, checkout=${nextDayCheckOut.toISOString()}`);
+                    console.log(`[N1 DEBUG] ACCEPTED checkout: empCode=${emp.empCode}, date=${date}, checkIn=${checkIn.toISOString()}, checkout=${nextDayCheckOut.toISOString()}, checkOutDateStr=${checkOutDateStr}, expectedDateStr=${expectedCheckOutDateStr}`);
                     checkOut = nextDayCheckOut;
                   }
                 }
