@@ -171,12 +171,15 @@ export async function POST(req) {
     }).lean();
     
     // Calculate next day date for night shift checkOut lookup
-    const currentDateObj = new Date(`${date}T00:00:00${TZ}`);
+    // Parse the date string (YYYY-MM-DD) and add 1 day
+    // Use simple date arithmetic to avoid timezone issues
+    const [year, month, day] = date.split('-').map(Number);
+    const currentDateObj = new Date(Date.UTC(year, month - 1, day));
     const nextDateObj = new Date(currentDateObj);
-    nextDateObj.setDate(nextDateObj.getDate() + 1);
-    const nextDateStr = nextDateObj.getFullYear() + '-' + 
-                        String(nextDateObj.getMonth() + 1).padStart(2, '0') + '-' + 
-                        String(nextDateObj.getDate()).padStart(2, '0');
+    nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
+    const nextDateStr = nextDateObj.getUTCFullYear() + '-' + 
+                        String(nextDateObj.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                        String(nextDateObj.getUTCDate()).padStart(2, '0');
     
     // Load existing ShiftAttendance records for next day (for night shift checkOut that occurs on next day)
     const nextDayRecords = await ShiftAttendance.find({
