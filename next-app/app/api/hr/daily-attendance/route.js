@@ -259,10 +259,17 @@ export async function POST(req) {
       const times = rec?.times ? [...rec.times].sort((a, b) => a - b) : [];
 
       // Use checkIn from events if available, otherwise from existing record
+      // IMPORTANT: For night shift validation, we ONLY trust checkIn from current day's events
+      // Using checkIn from existingRecord can cause issues when validating next day's checkout
       let checkIn = times[0] || null;
+      // Only use existingRecord.checkIn if we have NO events for this day (employee didn't check in today)
+      // But for night shift checkout validation, we'll only validate if checkIn is from current day's events
       if (!checkIn && existingRecord?.checkIn) {
         checkIn = new Date(existingRecord.checkIn);
       }
+      
+      // Track if checkIn is from current day's events (for night shift validation)
+      const checkInIsFromCurrentDayEvents = times.length > 0 && times[0] != null;
 
       // Determine checkOut: prefer from events if multiple punches, otherwise use existing record or next day's record
       // IMPORTANT: For night shifts, checkout can be on next day, so we need to be careful not to use
@@ -428,8 +435,13 @@ export async function POST(req) {
                 // This ensures we only show checkout for shifts that STARTED on the business date
                 // Example: When viewing Jan 1, we should NOT show checkout from Dec 31 shift (Dec 31 check-in)
                 // We SHOULD show checkout from Jan 1 shift (Jan 1 check-in, checkout on Jan 2)
-                if (checkInDateStr !== date) {
-                  // CheckIn is NOT on the business date - this checkout belongs to previous day's shift
+                // 
+                // ADDITIONAL VALIDATION: For night shifts, ONLY trust checkIn from current day's events
+                // If checkIn came from existingRecord, it might be stale/incorrect data from a previous save
+                // This prevents showing checkouts from previous day's shifts when saved records have incorrect data
+                if (checkInDateStr !== date || !checkInIsFromCurrentDayEvents) {
+                  // CheckIn is NOT on the business date OR checkIn is not from current day's events
+                  // This checkout belongs to previous day's shift or data is unreliable
                   // Example: Viewing Jan 1, but checkIn was Dec 31 - this checkout is from Dec 31's shift, not Jan 1's
                   nextDayCheckOut = null;
                 } else {
