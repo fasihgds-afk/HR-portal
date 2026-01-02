@@ -335,6 +335,7 @@ export async function POST(req) {
           // ====================================================================================
           
           // Try next day's ShiftAttendance record first
+          // We'll validate it belongs to current day's shift later by checking checkIn date
           const nextDayRecord = nextDayByEmpCode.get(emp.empCode);
           let nextDayCheckOut = null;
           
@@ -423,9 +424,13 @@ export async function POST(req) {
                 
                 const checkInDateStr = getLocalDateStr(checkIn, TZ);
                 
-                // Compare checkIn date with business date
+                // CRITICAL: Compare checkIn date with business date
+                // This ensures we only show checkout for shifts that STARTED on the business date
+                // Example: When viewing Jan 1, we should NOT show checkout from Dec 31 shift (Dec 31 check-in)
+                // We SHOULD show checkout from Jan 1 shift (Jan 1 check-in, checkout on Jan 2)
                 if (checkInDateStr !== date) {
-                  // CheckIn is NOT on the business date - this checkout doesn't belong to current day's shift
+                  // CheckIn is NOT on the business date - this checkout belongs to previous day's shift
+                  // Example: Viewing Jan 1, but checkIn was Dec 31 - this checkout is from Dec 31's shift, not Jan 1's
                   nextDayCheckOut = null;
                 } else {
                   // CheckIn is on the business date - validate checkout timing
