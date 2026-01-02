@@ -380,26 +380,35 @@ export async function POST(req) {
               const nextDayStartLocal = new Date(`${nextDateStr}T00:00:00${TZ}`);
               const nextDayEndLocal = new Date(`${nextDateStr}T08:00:00${TZ}`);
               
-              // CRITICAL: Also add a constraint that checkout must be AFTER the checkIn time
-              // This ensures we only get checkout events that belong to current day's shift
-              // Example: Jan 1 checkIn at 21:00 → checkout on Jan 2 must be after Jan 1 21:00
-              const checkInTime = new Date(checkIn);
-              
+              // Query events from next day 00:00 to 08:00
+              // We query the full range and validate later that checkout is after checkIn
+              // This ensures we capture all night shift checkouts (N1: 03:00, N2: 06:00, etc.)
               const nextDayEvents = await AttendanceEvent.find({
                 empCode: emp.empCode,
                 eventTime: { 
-                  $gte: nextDayStartLocal > checkInTime ? nextDayStartLocal : checkInTime,
+                  $gte: nextDayStartLocal,
                   $lte: nextDayEndLocal 
                 },
                 minor: 38, // "valid access" events only
               })
               .sort({ eventTime: 1 }) // Sort by time ascending
-              .limit(1) // Only need the first (earliest) event after checkIn
+              .limit(10) // Get multiple events, we'll filter to find the one after checkIn
               .lean();
               
-              // Get the earliest event on next day (which is the checkOut from previous night shift)
+              // Get the first event on next day that is AFTER the checkIn time
+              // This ensures we only get checkout events that belong to current day's shift
+              // Example: Jan 1 N1 checkIn at 18:00 → checkout on Jan 2 must be after Jan 1 18:00
+              // Example: Jan 1 N2 checkIn at 21:00 → checkout on Jan 2 must be after Jan 1 21:00
               if (nextDayEvents.length > 0) {
-                nextDayCheckOut = new Date(nextDayEvents[0].eventTime);
+                const checkInTime = new Date(checkIn);
+                for (const event of nextDayEvents) {
+                  const eventTime = new Date(event.eventTime);
+                  // Find the first event that is after checkIn time
+                  if (eventTime > checkInTime) {
+                    nextDayCheckOut = eventTime;
+                    break;
+                  }
+                }
               }
             } catch (e) {
               // Ignore errors - will continue without checkOut
