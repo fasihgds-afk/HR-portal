@@ -22,9 +22,11 @@ export async function GET(req) {
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
-      // SIMPLE: Use Mongoose with .lean() - execute immediately, no wrappers
+      // SIMPLE: Use Mongoose with .select() and .lean() - execute immediately
       const projection = getEmployeeProjection(true);
-      const employee = await Employee.findOne({ empCode }, projection).lean();
+      const employee = await Employee.findOne({ empCode })
+        .select(projection)
+        .lean();
       
       if (!employee) {
         throw new NotFoundError(`Employee ${empCode}`);
@@ -51,9 +53,11 @@ export async function GET(req) {
     const skip = (page - 1) * limit;
     const hasFilters = Object.keys(filter).length > 0;
 
-    // EXECUTE SEQUENTIALLY - Avoid Promise.all which might cause double execution in serverless
-    // Build and execute find query first
-    const employees = await Employee.find(filter || {}, listProjection)
+    // EXECUTE SEQUENTIALLY - Avoid Promise.all which might cause double execution
+    // Use .select() instead of projection parameter with .lean()
+    // Build query, select fields, then lean and execute
+    const employees = await Employee.find(filter || {})
+      .select(listProjection)
       .sort(sortOptions || { empCode: 1 })
       .skip(skip)
       .limit(limit)
