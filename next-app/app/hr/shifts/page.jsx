@@ -1,13 +1,48 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useSession, signOut } from 'next-auth/react';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
+import { useAutoLogout } from '@/hooks/useAutoLogout';
+import AutoLogoutWarning from '@/components/ui/AutoLogoutWarning';
 
 export default function ShiftManagementPage() {
+  const router = useRouter();
+  const { data: session } = useSession();
+  const { colors, theme } = useTheme();
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ type: '', text: '' });
   const [modalOpen, setModalOpen] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
+
+  // Auto logout after 30 minutes of inactivity (with 5 minute warning)
+  const { showWarning, timeRemaining, handleStayLoggedIn, handleLogout: autoLogout } = useAutoLogout({
+    inactivityTime: 30 * 60 * 1000, // 30 minutes
+    warningTime: 5 * 60 * 1000, // 5 minutes warning
+    enabled: true,
+    onLogout: () => {
+      signOut({ redirect: false, callbackUrl: '/login?role=hr' }).then(() => {
+        router.push('/login?role=hr');
+      });
+    },
+  });
+
+  // Manual logout handler
+  const handleLogout = async () => {
+    try {
+      await signOut({ 
+        redirect: false,
+        callbackUrl: '/login?role=hr'
+      });
+      router.push('/login?role=hr');
+    } catch (error) {
+      console.error('Logout error:', error);
+      router.push('/login?role=hr');
+    }
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -143,8 +178,8 @@ export default function ShiftManagementPage() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Are you sure you want to deactivate this shift?')) return;
+  async function handleDeactivate(id) {
+    if (!confirm('Are you sure you want to deactivate this shift? You can reactivate it later.')) return;
 
     try {
       setLoading(true);
@@ -155,6 +190,27 @@ export default function ShiftManagementPage() {
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to deactivate shift');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handlePermanentDelete(id, shiftCode) {
+    const confirmMessage = `Are you sure you want to PERMANENTLY DELETE the shift "${shiftCode}"?\n\n⚠️ WARNING: This action cannot be undone. The shift will be completely removed from the system.`;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/hr/shifts/${id}?permanent=true`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to delete shift');
+      }
+      showToast('success', 'Shift permanently deleted successfully');
+      await loadShifts();
+    } catch (err) {
+      console.error(err);
+      showToast('error', err.message || 'Failed to delete shift');
     } finally {
       setLoading(false);
     }
@@ -189,9 +245,9 @@ export default function ShiftManagementPage() {
     <div
       style={{
         minHeight: '100vh',
-        padding: '24px 16px 32px',
-        background: 'radial-gradient(circle at top, #0b2344 0, #061525 40%, #020617 100%)',
-        color: '#e5e7eb',
+        padding: '24px 28px 32px',
+        background: colors.gradient.overlay,
+        color: colors.text.primary,
         fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       }}
     >
@@ -240,36 +296,57 @@ export default function ShiftManagementPage() {
         `,
         }}
       />
-      {/* Header */}
-      <div style={{ maxWidth: 1400, margin: '0 auto 20px auto' }}>
+      {/* Enhanced Professional Header */}
+      <div style={{ maxWidth: 1400, margin: '0 auto 24px auto' }}>
         <div
           className="shift-header"
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 22px',
-            borderRadius: 18,
-            background: 'linear-gradient(135deg, #19264aff, #0c225cff, #58D34D)',
-            color: '#f9fafb',
-            boxShadow: '0 16px 38px rgba(255, 255, 255, 0.09)',
+            padding: '20px 28px',
+            borderRadius: 20,
+            background: colors.gradient.header,
+            color: theme === 'dark' ? '#ffffff' : colors.text.primary,
+            boxShadow: theme === 'dark' 
+              ? "0 20px 50px rgba(19, 168, 229, 0.25), 0 8px 16px rgba(0, 0, 0, 0.3)"
+              : "0 20px 50px rgba(59, 130, 246, 0.15), 0 8px 16px rgba(0, 0, 0, 0.1)",
+            border: `1px solid ${colors.border.default}`,
+            position: 'relative',
+            overflow: 'hidden',
             flexWrap: 'wrap',
             gap: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* Background Pattern */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+              pointerEvents: 'none',
+            }}
+          />
+          
+          {/* Left: logo + title */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, position: 'relative', zIndex: 1 }}>
             <div
               className="shift-header-logo"
               style={{
-                width: 100,
-                height: 100,
-                borderRadius: '999px',
+                width: 72,
+                height: 72,
+                borderRadius: 16,
                 overflow: 'hidden',
-                backgroundColor: 'rgba(15,23,42,0.4)',
+                backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(59, 130, 246, 0.1)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
+                boxShadow: '0 8px 16px rgba(0, 0, 0, 0.2)',
+                border: `2px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : colors.border.default}`,
               }}
             >
               <img
@@ -290,9 +367,11 @@ export default function ShiftManagementPage() {
               <div
                 className="shift-header-title"
                 style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  letterSpacing: 0.4,
+                  fontSize: 24,
+                  fontWeight: 800,
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
+                  textShadow: theme === 'dark' ? '0 2px 8px rgba(0, 0, 0, 0.2)' : 'none',
                 }}
               >
                 Global Digital Solutions
@@ -300,8 +379,9 @@ export default function ShiftManagementPage() {
               <div
                 className="shift-header-subtitle"
                 style={{
-                  fontSize: 12.5,
-                  opacity: 0.9,
+                  fontSize: 13,
+                  opacity: 0.95,
+                  fontWeight: 500,
                 }}
               >
                 Shift Management · Create & Configure Employee Shifts
@@ -309,32 +389,88 @@ export default function ShiftManagementPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Right: actions */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
+            <ThemeToggle />
             <button
               className="shift-button"
               onClick={openNewModal}
               style={{
-                padding: '9px 20px',
-                borderRadius: 999,
-                border: 'none',
-                background: 'linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)',
-                color: '#ffffffff',
-                fontWeight: 700,
+                padding: '9px 18px',
+                borderRadius: 12,
+                border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.25)' : colors.border.default}`,
+                backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : colors.background.card,
+                color: theme === 'dark' ? '#ffffff' : colors.text.primary,
+                fontWeight: 600,
                 fontSize: 13,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: '0 14px 30px rgba(16,185,129,0.5)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
                 whiteSpace: 'nowrap',
+                backdropFilter: 'blur(10px)',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.25)' : colors.background.hover;
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : colors.background.card;
+                e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
               <span style={{ fontSize: 18 }}>+</span>
               Create New Shift
             </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 12,
+                border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.3)' : colors.border.default}`,
+                backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : colors.background.card,
+                color: theme === 'dark' ? '#ffffff' : colors.text.primary,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                backdropFilter: 'blur(10px)',
+                transition: 'all 0.2s',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.25)' : colors.background.hover;
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : colors.background.card;
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Logout
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Auto Logout Warning */}
+      {showWarning && (
+        <AutoLogoutWarning
+          isOpen={showWarning}
+          timeRemaining={timeRemaining}
+          onStayLoggedIn={handleStayLoggedIn}
+          onLogoutNow={autoLogout}
+        />
+      )}
 
       {/* Main Card */}
       <div
@@ -342,9 +478,12 @@ export default function ShiftManagementPage() {
           maxWidth: 1400,
           margin: '0 auto',
           borderRadius: 16,
-          background: 'radial-gradient(circle at top, #020617, #020617)',
-          boxShadow: '0 20px 60px rgba(15,23,42,0.9)',
+          background: colors.background.card,
+          boxShadow: theme === 'dark' 
+            ? '0 20px 60px rgba(15,23,42,0.9)'
+            : '0 20px 60px rgba(0,0,0,0.08)',
           padding: '16px 20px 20px',
+          border: `1px solid ${colors.border.default}`,
         }}
       >
         {toast.text && (
@@ -353,10 +492,12 @@ export default function ShiftManagementPage() {
               padding: 12,
               borderRadius: 8,
               marginBottom: 16,
-              backgroundColor: toast.type === 'success' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-              color: toast.type === 'success' ? '#6ee7b7' : '#fca5a5',
+              backgroundColor: toast.type === 'success' 
+                ? (theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : `${colors.success}20`)
+                : (theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : `${colors.error}20`),
+              color: toast.type === 'success' ? colors.success : colors.error,
               fontSize: 14,
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'}`,
+              border: `1px solid ${toast.type === 'success' ? colors.success : colors.error}40`,
             }}
           >
             {toast.text}
@@ -369,15 +510,28 @@ export default function ShiftManagementPage() {
             disabled={loading}
             style={{
               padding: '10px 20px',
-              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              background: `linear-gradient(135deg, ${colors.primary[500]}, ${colors.primary[600]})`,
               color: '#ffffff',
               border: 'none',
-              borderRadius: 999,
+              borderRadius: 12,
               cursor: loading ? 'not-allowed' : 'pointer',
               fontSize: 14,
-              fontWeight: 700,
-              boxShadow: '0 8px 20px rgba(59,130,246,0.4)',
+              fontWeight: 600,
+              boxShadow: `0 8px 20px ${colors.primary[500]}40`,
               opacity: loading ? 0.6 : 1,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = `0 10px 24px ${colors.primary[500]}50`;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = `0 8px 20px ${colors.primary[500]}40`;
+              }
             }}
           >
             ✓ Activate All Shifts
@@ -386,14 +540,26 @@ export default function ShiftManagementPage() {
             onClick={openNewModal}
             style={{
               padding: '10px 20px',
-              background: 'linear-gradient(135deg, #22c55e, #2dd4bf)',
-              color: '#022c22',
+              background: `linear-gradient(135deg, ${colors.success}, ${colors.secondary[600]})`,
+              color: theme === 'dark' ? '#ffffff' : colors.secondary[900],
               border: 'none',
-              borderRadius: 999,
+              borderRadius: 12,
               cursor: 'pointer',
               fontSize: 14,
-              fontWeight: 700,
-              boxShadow: '0 8px 20px rgba(34,197,94,0.4)',
+              fontWeight: 600,
+              boxShadow: `0 8px 20px ${colors.success}40`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = `0 10px 24px ${colors.success}50`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = `0 8px 20px ${colors.success}40`;
             }}
           >
             <span style={{ fontSize: 18 }}>+</span>
@@ -402,7 +568,7 @@ export default function ShiftManagementPage() {
         </div>
 
         {loading && !shifts.length ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>
+          <div style={{ textAlign: 'center', padding: 40, color: colors.text.muted }}>
             Loading shifts...
           </div>
         ) : (
@@ -410,9 +576,10 @@ export default function ShiftManagementPage() {
             className="shift-table-wrapper"
             style={{
               borderRadius: 12,
-              border: '1px solid rgba(55,65,81,0.9)',
+              border: `1px solid ${colors.border.default}`,
               overflow: 'hidden',
               overflowX: 'auto',
+              backgroundColor: colors.background.card,
             }}
           >
             <table
@@ -424,23 +591,23 @@ export default function ShiftManagementPage() {
               }}
             >
               <thead>
-                <tr style={{ backgroundColor: 'rgba(15,23,42,0.9)', borderBottom: '2px solid rgba(55,65,81,0.9)' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                <tr style={{ backgroundColor: colors.background.table.header, borderBottom: `2px solid ${colors.border.table}` }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Code
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Name
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Time
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Grace Period
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Status
                   </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 13, fontWeight: 600, color: colors.text.table.header }}>
                     Actions
                   </th>
                 </tr>
@@ -453,31 +620,43 @@ export default function ShiftManagementPage() {
                       style={{
                         padding: 40,
                         textAlign: 'center',
-                        color: '#9ca3af',
+                        color: colors.text.muted,
                         fontSize: 14,
+                        backgroundColor: colors.background.table.row,
                       }}
                     >
                       No shifts found. Create your first shift to get started.
                     </td>
                   </tr>
                 ) : (
-                  shifts.map((shift) => (
+                  shifts.map((shift, index) => (
                     <tr
                       key={shift._id}
                       style={{
-                        borderBottom: '1px solid rgba(55,65,81,0.5)',
-                        backgroundColor: shift.isActive ? 'rgba(15,23,42,0.3)' : 'rgba(127,29,29,0.2)',
+                        borderBottom: `1px solid ${colors.border.table}`,
+                        backgroundColor: index % 2 === 0 
+                          ? colors.background.table.row 
+                          : colors.background.table.rowEven,
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = colors.background.table.rowHover;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = index % 2 === 0 
+                          ? colors.background.table.row 
+                          : colors.background.table.rowEven;
                       }}
                     >
-                      <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 600, color: '#e5e7eb' }}>
+                      <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 600, color: colors.text.table.cell }}>
                         {shift.code}
                       </td>
-                      <td style={{ padding: '12px 16px', fontSize: 14, color: '#d1d5db' }}>{shift.name}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 14, color: '#d1d5db' }}>
+                      <td style={{ padding: '12px 16px', fontSize: 14, color: colors.text.table.cell }}>{shift.name}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 14, color: colors.text.table.cell }}>
                         {shift.startTime} - {shift.endTime}
                         {shift.crossesMidnight && ' (next day)'}
                       </td>
-                      <td style={{ padding: '12px 16px', fontSize: 14, color: '#d1d5db' }}>{shift.gracePeriod} min</td>
+                      <td style={{ padding: '12px 16px', fontSize: 14, color: colors.text.table.cell }}>{shift.gracePeriod} min</td>
                       <td style={{ padding: '12px 16px', fontSize: 14 }}>
                         <span
                           style={{
@@ -485,9 +664,11 @@ export default function ShiftManagementPage() {
                             borderRadius: 999,
                             fontSize: 12,
                             fontWeight: 600,
-                            backgroundColor: shift.isActive ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                            color: shift.isActive ? '#6ee7b7' : '#fca5a5',
-                            border: `1px solid ${shift.isActive ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'}`,
+                            backgroundColor: shift.isActive 
+                              ? (theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : `${colors.success}20`)
+                              : (theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : `${colors.error}20`),
+                            color: shift.isActive ? colors.success : colors.error,
+                            border: `1px solid ${shift.isActive ? colors.success : colors.error}40`,
                           }}
                         >
                           {shift.isActive ? 'Active' : 'Inactive'}
@@ -499,34 +680,76 @@ export default function ShiftManagementPage() {
                             onClick={() => openEditModal(shift)}
                             style={{
                               padding: '6px 14px',
-                              backgroundColor: 'rgba(59,130,246,0.2)',
-                              color: '#93c5fd',
-                              border: '1px solid rgba(59,130,246,0.5)',
+                              backgroundColor: theme === 'dark' ? 'rgba(59,130,246,0.2)' : `${colors.primary[500]}20`,
+                              color: colors.primary[400] || colors.primary[500],
+                              border: `1px solid ${colors.primary[500]}40`,
                               borderRadius: 6,
                               cursor: 'pointer',
                               fontSize: 12,
                               fontWeight: 600,
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(59,130,246,0.3)' : `${colors.primary[500]}30`;
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(59,130,246,0.2)' : `${colors.primary[500]}20`;
+                              e.currentTarget.style.transform = 'translateY(0)';
                             }}
                           >
                             Edit
                           </button>
                           {shift.isActive && (
                             <button
-                              onClick={() => handleDelete(shift._id)}
+                              onClick={() => handleDeactivate(shift._id)}
                               style={{
                                 padding: '6px 14px',
-                                backgroundColor: 'rgba(239,68,68,0.2)',
-                                color: '#fca5a5',
-                                border: '1px solid rgba(239,68,68,0.5)',
+                                backgroundColor: theme === 'dark' ? 'rgba(251, 191, 36, 0.2)' : `${colors.warning}20`,
+                                color: colors.warning,
+                                border: `1px solid ${colors.warning}40`,
                                 borderRadius: 6,
                                 cursor: 'pointer',
                                 fontSize: 12,
                                 fontWeight: 600,
+                                transition: 'all 0.2s',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(251, 191, 36, 0.3)' : `${colors.warning}30`;
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(251, 191, 36, 0.2)' : `${colors.warning}20`;
+                                e.currentTarget.style.transform = 'translateY(0)';
                               }}
                             >
                               Deactivate
                             </button>
                           )}
+                          <button
+                            onClick={() => handlePermanentDelete(shift._id, shift.code)}
+                            style={{
+                              padding: '6px 14px',
+                              backgroundColor: theme === 'dark' ? 'rgba(239,68,68,0.2)' : `${colors.error}20`,
+                              color: colors.error,
+                              border: `1px solid ${colors.error}40`,
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(239,68,68,0.3)' : `${colors.error}30`;
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(239,68,68,0.2)' : `${colors.error}20`;
+                              e.currentTarget.style.transform = 'translateY(0)';
+                            }}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -547,27 +770,30 @@ export default function ShiftManagementPage() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.5)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 1000,
             padding: '20px',
+            backdropFilter: 'blur(4px)',
           }}
           onClick={closeModal}
         >
           <div
             className="shift-modal"
             style={{
-              backgroundColor: '#0f172a',
+              backgroundColor: colors.background.card,
               borderRadius: 16,
               padding: '24px',
               maxWidth: 600,
               width: '100%',
               maxHeight: '90vh',
               overflow: 'auto',
-              border: '1px solid rgba(55,65,81,0.9)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+              border: `1px solid ${colors.border.default}`,
+              boxShadow: theme === 'dark' 
+                ? '0 20px 60px rgba(0,0,0,0.8)'
+                : '0 20px 60px rgba(0,0,0,0.15)',
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -576,7 +802,7 @@ export default function ShiftManagementPage() {
                 fontSize: 20,
                 fontWeight: 700,
                 marginBottom: 20,
-                color: '#e5e7eb',
+                color: colors.text.primary,
               }}
             >
               {editingShift ? 'Edit Shift' : 'Create New Shift'}
@@ -597,7 +823,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       marginBottom: 6,
                       display: 'block',
                     }}
@@ -611,12 +837,12 @@ export default function ShiftManagementPage() {
                     style={{
                       padding: '10px 14px',
                       borderRadius: 8,
-                      border: '1px solid rgba(55,65,81,0.9)',
+                      border: `1px solid ${colors.border.input}`,
                       fontSize: 14,
                       width: '100%',
                       outline: 'none',
-                      backgroundColor: 'rgba(15,23,42,0.5)',
-                      color: '#e5e7eb',
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                     }}
                     required
                     placeholder="e.g., Day Shift 1"
@@ -627,7 +853,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       marginBottom: 6,
                       display: 'block',
                     }}
@@ -641,12 +867,12 @@ export default function ShiftManagementPage() {
                     style={{
                       padding: '10px 14px',
                       borderRadius: 8,
-                      border: '1px solid rgba(55,65,81,0.9)',
+                      border: `1px solid ${colors.border.input}`,
                       fontSize: 14,
                       width: '100%',
                       outline: 'none',
-                      backgroundColor: 'rgba(15,23,42,0.5)',
-                      color: '#e5e7eb',
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                     }}
                     required
                     placeholder="e.g., D1"
@@ -669,7 +895,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       marginBottom: 6,
                       display: 'block',
                     }}
@@ -683,12 +909,12 @@ export default function ShiftManagementPage() {
                     style={{
                       padding: '10px 14px',
                       borderRadius: 8,
-                      border: '1px solid rgba(55,65,81,0.9)',
+                      border: `1px solid ${colors.border.input}`,
                       fontSize: 14,
                       width: '100%',
                       outline: 'none',
-                      backgroundColor: 'rgba(15,23,42,0.5)',
-                      color: '#e5e7eb',
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                     }}
                     required
                   />
@@ -698,7 +924,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       marginBottom: 6,
                       display: 'block',
                     }}
@@ -712,12 +938,12 @@ export default function ShiftManagementPage() {
                     style={{
                       padding: '10px 14px',
                       borderRadius: 8,
-                      border: '1px solid rgba(55,65,81,0.9)',
+                      border: `1px solid ${colors.border.input}`,
                       fontSize: 14,
                       width: '100%',
                       outline: 'none',
-                      backgroundColor: 'rgba(15,23,42,0.5)',
-                      color: '#e5e7eb',
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                     }}
                     required
                   />
@@ -738,7 +964,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       marginBottom: 6,
                       display: 'block',
                     }}
@@ -752,12 +978,12 @@ export default function ShiftManagementPage() {
                     style={{
                       padding: '10px 14px',
                       borderRadius: 8,
-                      border: '1px solid rgba(55,65,81,0.9)',
+                      border: `1px solid ${colors.border.input}`,
                       fontSize: 14,
                       width: '100%',
                       outline: 'none',
-                      backgroundColor: 'rgba(15,23,42,0.5)',
-                      color: '#e5e7eb',
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                     }}
                     min="0"
                     required
@@ -774,7 +1000,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       cursor: 'pointer',
                     }}
                   >
@@ -784,15 +1010,15 @@ export default function ShiftManagementPage() {
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <label
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#d1d5db',
-                    marginBottom: 6,
-                    display: 'block',
-                  }}
-                >
+                  <label
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: colors.text.secondary,
+                      marginBottom: 6,
+                      display: 'block',
+                    }}
+                  >
                   Description
                 </label>
                 <textarea
@@ -801,14 +1027,14 @@ export default function ShiftManagementPage() {
                   style={{
                     padding: '10px 14px',
                     borderRadius: 8,
-                    border: '1px solid rgba(55,65,81,0.9)',
+                    border: `1px solid ${colors.border.input}`,
                     fontSize: 14,
                     width: '100%',
                     minHeight: 80,
                     resize: 'vertical',
                     outline: 'none',
-                    backgroundColor: 'rgba(15,23,42,0.5)',
-                    color: '#e5e7eb',
+                    backgroundColor: colors.background.input,
+                    color: colors.text.primary,
                     fontFamily: 'inherit',
                   }}
                   placeholder="Optional description"
@@ -821,7 +1047,7 @@ export default function ShiftManagementPage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: '#d1d5db',
+                      color: colors.text.secondary,
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
@@ -853,9 +1079,9 @@ export default function ShiftManagementPage() {
                   onClick={closeModal}
                   style={{
                     padding: '10px 20px',
-                    backgroundColor: 'rgba(55,65,81,0.5)',
-                    color: '#d1d5db',
-                    border: '1px solid rgba(55,65,81,0.9)',
+                    backgroundColor: colors.background.secondary,
+                    color: colors.text.primary,
+                    border: `1px solid ${colors.border.default}`,
                     borderRadius: 8,
                     cursor: 'pointer',
                     fontSize: 14,
@@ -869,15 +1095,16 @@ export default function ShiftManagementPage() {
                   disabled={loading}
                   style={{
                     padding: '10px 20px',
-                    background: 'linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)',
-                    color: '#ffffffff',
+                    background: `linear-gradient(135deg, ${colors.primary[500]}, ${colors.primary[600]})`,
+                    color: '#ffffff',
                     border: 'none',
                     borderRadius: 8,
                     cursor: loading ? 'not-allowed' : 'pointer',
                     fontSize: 14,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     opacity: loading ? 0.6 : 1,
-                    boxShadow: '0 14px 30px rgba(16,185,129,0.5)',
+                    boxShadow: `0 8px 20px ${colors.primary[500]}40`,
+                    transition: 'all 0.2s',
                   }}
                 >
                   {loading ? 'Saving...' : editingShift ? 'Update' : 'Create'}

@@ -3,7 +3,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
+import { useTheme } from "@/lib/theme/ThemeContext";
+import ThemeToggle from "@/components/ui/ThemeToggle";
+import Modal from "@/components/ui/Modal";
+import EmployeeProfileEdit from "@/components/employees/EmployeeProfileEdit";
+import { useAutoLogout } from "@/hooks/useAutoLogout";
+import AutoLogoutWarning from "@/components/ui/AutoLogoutWarning";
 
 // Convert number to words (for amount in words)
 function numberToWords(num) {
@@ -41,6 +47,7 @@ function numberToWords(num) {
 
 // Salary Slip Component
 function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
+  const { colors, theme } = useTheme();
   if (!isOpen) return null;
   
   if (loading) {
@@ -266,7 +273,7 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.75)',
           zIndex: 9999,
           display: 'flex',
           alignItems: 'center',
@@ -281,12 +288,13 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
         <div
           className="salary-slip-container"
           style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: colors.background.card,
             width: '100%',
             maxWidth: 'min(90vw, 650px)',
             borderRadius: '12px',
             padding: '14px',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            boxShadow: colors.card.shadow,
+            border: `1px solid ${colors.border.default}`,
             position: 'relative',
             maxHeight: '95vh',
             overflowY: 'auto',
@@ -305,14 +313,24 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
               onClick={handlePrint}
               style={{
                 padding: '8px 16px',
-                backgroundColor: '#2563eb',
-                color: 'white',
+                background: `linear-gradient(135deg, ${colors.primary[500]}, ${colors.primary[600]})`,
+                color: '#ffffff',
                 border: 'none',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 cursor: 'pointer',
                 fontWeight: 600,
                 fontSize: '12px',
                 whiteSpace: 'nowrap',
+                boxShadow: `0 4px 12px ${colors.primary[500]}40`,
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = `0 6px 16px ${colors.primary[500]}60`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = `0 4px 12px ${colors.primary[500]}40`;
               }}
             >
               📄 Download PDF
@@ -321,14 +339,21 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
               onClick={onClose}
               style={{
                 padding: '8px 16px',
-                backgroundColor: '#6b7280',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
+                backgroundColor: colors.background.tertiary,
+                color: colors.text.primary,
+                border: `1px solid ${colors.border.default}`,
+                borderRadius: '8px',
                 cursor: 'pointer',
                 fontWeight: 600,
                 fontSize: '12px',
                 whiteSpace: 'nowrap',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = colors.background.hover;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = colors.background.tertiary;
               }}
             >
               Close
@@ -336,7 +361,7 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
           </div>
 
           {/* Salary Slip Content */}
-          <div style={{ fontFamily: 'Arial, sans-serif', color: '#1f2937', backgroundColor: '#ffffff' }}>
+          <div style={{ fontFamily: 'Arial, sans-serif', color: colors.text.primary, backgroundColor: colors.background.card }}>
             {/* Company Header with Logo (like dashboard) - Extra Compact & Responsive */}
             <div className="header-section" style={{ 
               display: 'flex', 
@@ -345,7 +370,7 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
               padding: '10px 12px',
               marginBottom: '12px',
               borderRadius: '8px',
-              background: 'linear-gradient(135deg, #19264a, #0c225c, #58D34D)',
+              background: colors.gradient.primary,
               color: '#f9fafb',
               boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
               flexWrap: 'wrap',
@@ -406,22 +431,22 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
             </div>
 
             {/* Employee Pay Summary - Extra Compact & Responsive */}
-            <div className="pay-summary" style={{ marginBottom: '12px', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
-              <h3 style={{ fontSize: 'clamp(10px, 1.5vw, 11px)', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+            <div className="pay-summary" style={{ marginBottom: '12px', padding: '10px', backgroundColor: colors.background.secondary, borderRadius: '6px', border: `1px solid ${colors.border.default}` }}>
+              <h3 style={{ fontSize: 'clamp(10px, 1.5vw, 11px)', fontWeight: 600, color: colors.text.primary, marginBottom: '8px' }}>
                 Employee Pay Summary *
               </h3>
               <div className="pay-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
                 <div>
                   <div className="pay-field" style={{ marginBottom: '8px' }}>
-                    <label style={{ fontSize: 'clamp(8px, 1.2vw, 9px)', fontWeight: 500, color: '#6b7280', display: 'block', marginBottom: '2px' }}>
+                    <label style={{ fontSize: 'clamp(8px, 1.2vw, 9px)', fontWeight: 500, color: colors.text.tertiary, display: 'block', marginBottom: '2px' }}>
                       Employee Name :
                     </label>
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
                       fontWeight: 600,
-                      color: '#111827',
+                      color: colors.text.primary,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {employeeData.name || 'N/A'}
                     </div>
@@ -432,9 +457,9 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
                     </label>
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
-                      color: '#111827',
+                      color: colors.text.primary,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {getMonthName(month)} {month?.split('-')[0]}
                     </div>
@@ -446,9 +471,9 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
                       fontWeight: 600,
-                      color: '#dc2626',
+                      color: colors.error,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {deductionDays.toFixed(3)}
                     </div>
@@ -462,9 +487,9 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
                       fontWeight: 600,
-                      color: '#111827',
+                      color: colors.text.primary,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {employeeData.empCode || 'N/A'}
                     </div>
@@ -476,9 +501,9 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
                       fontWeight: 600,
-                      color: '#16a34a',
+                      color: colors.success,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {(30 - deductionDays).toFixed(0)}
                     </div>
@@ -489,9 +514,9 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
                     </label>
                     <div style={{ 
                       fontSize: 'clamp(9px, 1.3vw, 10px)', 
-                      color: '#111827',
+                      color: colors.text.primary,
                       paddingBottom: '2px',
-                      borderBottom: '1px dashed #d1d5db'
+                      borderBottom: `1px dashed ${colors.border.default}`
                     }}>
                       {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
@@ -550,7 +575,7 @@ function SalarySlipModal({ isOpen, onClose, employeeData, month, loading }) {
             <div className="net-payable" style={{ 
               marginBottom: '12px', 
               padding: '12px', 
-              background: 'linear-gradient(135deg, #19264a, #0c225c, #58D34D)',
+                background: colors.gradient.primary,
               borderRadius: '8px',
               boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
               color: '#ffffff'
@@ -612,10 +637,10 @@ function formatSalaryDays(value) {
 }
 
 // CLASSIFY CELL LIKE MONTHLY HR COLORS / STATUSES
-function classifyDayForRow(day) {
+function classifyDayForRow(day, colors, theme = 'dark') {
   const base = {
-    bg: "#020617",
-    fg: "#e5e7eb",
+    bg: colors.background.table.row,
+    fg: colors.text.table.cell,
     badge: undefined,
     tone: "default",
   };
@@ -628,40 +653,50 @@ function classifyDayForRow(day) {
 
   // WFH
   if (day.status === "Work From Home") {
-    return { bg: "#0b1120", fg: "#7dd3fc", badge: "WFH", tone: "info" };
+    return { 
+      bg: theme === 'dark' ? 'rgba(59, 130, 246, 0.2)' : '#dbeafe', 
+      fg: theme === 'dark' ? colors.primary[300] : colors.primary[800], 
+      badge: "WFH", 
+      tone: "info" 
+    };
   }
 
   // No punches at all
   if (!day.checkIn && !day.checkOut) {
     if (day.status === "Holiday") {
-      return { bg: "#020617", fg: "#9ca3af", badge: "Holiday", tone: "muted" };
+      return { 
+        bg: colors.background.tertiary, 
+        fg: colors.text.tertiary, 
+        badge: "Holiday", 
+        tone: "muted" 
+      };
     }
     if (isLeaveType) {
       return {
-        bg: "#451a03",
-        fg: "#fef9c3",
+        bg: theme === 'dark' ? 'rgba(251, 191, 36, 0.2)' : '#fef9c3',
+        fg: theme === 'dark' ? colors.warning : '#92400e',
         badge: day.status,
         tone: "leave",
       };
     }
     if (day.status === "Absent") {
       return {
-        bg: "#450a0a",
-        fg: "#fecaca",
+        bg: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+        fg: theme === 'dark' ? colors.error : '#991b1b',
         badge: "Absent",
         tone: "danger",
       };
     }
     if (day.status === "New Induction") {
       return {
-        bg: "#0b1120",
-        fg: "#e5e7eb",
+        bg: colors.background.table.row,
+        fg: colors.text.table.cell,
         badge: "New",
         tone: "info",
       };
     }
     // generic no-punch
-    return { bg: "#020617", fg: "#9ca3af", tone: "muted" };
+    return { bg: colors.background.tertiary, fg: colors.text.tertiary, tone: "muted" };
   }
 
   // Partial punches
@@ -669,8 +704,8 @@ function classifyDayForRow(day) {
     (day.checkIn && !day.checkOut) || (!day.checkIn && day.checkOut);
   if (isPartial) {
     return {
-      bg: "#450a0a",
-      fg: "#fecaca",
+      bg: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+      fg: theme === 'dark' ? colors.error : '#991b1b',
       badge: "Partial",
       tone: "danger",
     };
@@ -680,8 +715,8 @@ function classifyDayForRow(day) {
   const hasViolation = (day.late || day.earlyLeave) && !day.excused;
   if (hasViolation) {
     return {
-      bg: "#450a0a",
-      fg: "#fecaca",
+      bg: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+      fg: theme === 'dark' ? colors.error : '#991b1b',
       badge: "Late/Early",
       tone: "danger",
     };
@@ -689,19 +724,37 @@ function classifyDayForRow(day) {
 
   if (day.excused && (day.late || day.earlyLeave)) {
     return {
-      bg: "#022c22",
-      fg: "#bbf7d0",
+      bg: theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7',
+      fg: theme === 'dark' ? colors.success : '#166534',
       badge: "Excused",
       tone: "excused",
     };
   }
 
   // On-time
-  return { bg: "#022c22", fg: "#bbf7d0", badge: "On time", tone: "ok" };
+  return { 
+    bg: theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7', 
+    fg: theme === 'dark' ? colors.success : '#166534', 
+    badge: "On time", 
+    tone: "ok" 
+  };
 }
 
 function renderEmployeeAvatar(emp, size = 88) {
-  const src = emp?.profileImageUrl || emp?.profileImageBase64 || "";
+  // Handle base64 images - they need data URI prefix
+  let src = "";
+  if (emp?.profileImageUrl) {
+    src = emp.profileImageUrl;
+  } else if (emp?.profileImageBase64) {
+    // If it already has data: prefix, use it as is, otherwise add it
+    if (emp.profileImageBase64.startsWith('data:')) {
+      src = emp.profileImageBase64;
+    } else {
+      // Assume JPEG format, add data URI prefix
+      src = `data:image/jpeg;base64,${emp.profileImageBase64}`;
+    }
+  }
+  
   const initials =
     (emp?.name || "")
       .split(" ")
@@ -715,6 +768,13 @@ function renderEmployeeAvatar(emp, size = 88) {
       <img
         src={src}
         alt={emp?.name || emp?.empCode || "Employee"}
+        onError={(e) => {
+          // If image fails to load, fallback to initials
+          e.target.style.display = 'none';
+          if (e.target.nextSibling) {
+            e.target.nextSibling.style.display = 'flex';
+          }
+        }}
         style={{
           width: size,
           height: size,
@@ -722,6 +782,7 @@ function renderEmployeeAvatar(emp, size = 88) {
           objectFit: "cover",
           border: "2px solid rgba(148,163,184,0.7)",
           boxShadow: "0 8px 20px rgba(0,0,0,0.6)",
+          display: "block",
         }}
       />
     );
@@ -749,13 +810,14 @@ function renderEmployeeAvatar(emp, size = 88) {
 }
 
 function SummaryItem({ label, value, color, hint }) {
+  const { colors } = useTheme();
   return (
     <div
       style={{
         borderRadius: 14,
         padding: "10px 12px",
-        backgroundColor: "rgba(15,23,42,0.96)",
-        border: "1px solid rgba(55,65,81,0.9)",
+        backgroundColor: colors.background.card,
+        border: `1px solid ${colors.border.default}`,
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
@@ -766,7 +828,7 @@ function SummaryItem({ label, value, color, hint }) {
       <div
         style={{
           fontSize: 11,
-          color: "#9ca3af",
+          color: colors.text.tertiary,
           textTransform: "uppercase",
           letterSpacing: 0.8,
         }}
@@ -777,7 +839,7 @@ function SummaryItem({ label, value, color, hint }) {
         style={{
           fontSize: 20,
           fontWeight: 800,
-          color: color || "#e5e7eb",
+          color: color || colors.text.primary,
         }}
       >
         {value}
@@ -799,8 +861,17 @@ function SummaryItem({ label, value, color, hint }) {
 // --------------- PAGE -----------------
 
 export default function EmployeeDashboardPage() {
+  // ALL HOOKS MUST BE CALLED FIRST
+  const { colors, theme } = useTheme(); // Theme colors
   const router = useRouter();
   const { data: session, status } = useSession();
+
+  // Auto logout after 30 minutes of inactivity (with 5 minute warning)
+  const { showWarning, timeRemaining, handleStayLoggedIn, handleLogout: autoLogout } = useAutoLogout({
+    inactivityTime: 30 * 60 * 1000, // 30 minutes
+    warningTime: 5 * 60 * 1000, // 5 minutes warning
+    enabled: true,
+  });
 
   const [month, setMonth] = useState(() => {
     const now = new Date();
@@ -812,6 +883,11 @@ export default function EmployeeDashboardPage() {
   const [loadingAttendance, setLoadingAttendance] = useState(false);
   const [loadingEmployee, setLoadingEmployee] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  
+  // Profile edit modal state
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [successMsg, setSuccessMsg] = useState("");
 
   const empCode = session?.user?.empCode;
 
@@ -882,6 +958,66 @@ export default function EmployeeDashboardPage() {
 
     loadMonth();
   }, [month, empCode]);
+
+  // Handle profile update
+  async function handleProfileUpdate(formData) {
+    if (!empCode) {
+      setErrorMsg('Employee code not found');
+      return;
+    }
+
+    setSavingProfile(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/employee', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          empCode: empCode,
+          name: formData.name,
+          email: formData.email,
+          phoneNumber: formData.phoneNumber,
+          profileImageBase64: formData.profileImageBase64,
+          profileImageUrl: formData.profileImageUrl,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Failed to update profile (${res.status})`);
+      }
+
+      const data = await res.json();
+      
+      // Update local employee state
+      setEmployee(data.employee);
+      
+      // Reload employee profile to get updated data
+      const profileRes = await fetch(
+        `/api/employee?empCode=${encodeURIComponent(empCode)}`,
+        { method: 'GET', cache: 'no-store' }
+      );
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        if (profileData.employee) {
+          setEmployee(profileData.employee);
+        }
+      }
+
+      setSuccessMsg('Profile updated successfully!');
+      setTimeout(() => {
+        setShowEditProfile(false);
+        setSuccessMsg('');
+      }, 1500);
+    } catch (err) {
+      console.error('Profile update error:', err);
+      setErrorMsg(err.message || 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   // record for current empCode from monthly data
   const myRecord = useMemo(() => {
@@ -1201,6 +1337,18 @@ export default function EmployeeDashboardPage() {
           }
         }
       `}</style>
+      <style jsx global>{`
+        /* Style for Year and Month dropdown options */
+        .employee-header-right select option {
+          background-color: ${theme === 'dark' ? '#1e293b' : '#ffffff'};
+          color: ${theme === 'dark' ? '#f1f5f9' : '#0f172a'};
+          padding: 8px 12px;
+        }
+        .employee-header-right select:focus {
+          border-color: rgba(255, 255, 255, 0.5) !important;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+        }
+      `}</style>
       <div style={{ maxWidth: 1280, margin: "0 auto 22px auto" }}>
         {/* HEADER */}
         <div
@@ -1211,9 +1359,10 @@ export default function EmployeeDashboardPage() {
             justifyContent: "space-between",
             padding: "18px 24px",
             borderRadius: 20,
-            background: "linear-gradient(135deg, #19264a, #0c225c, #58D34D)",
+            background: colors.gradient.primary,
             color: "#f9fafb",
             boxShadow: "0 20px 45px rgba(0,0,0,0.25)",
+            border: `1px solid ${colors.border.hover}`,
           }}
         >
           <div className="employee-header-left" style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -1279,99 +1428,94 @@ export default function EmployeeDashboardPage() {
             </div>
           </div>
 
-          <div className="employee-header-right" style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  letterSpacing: 1.4,
-                  color: "#e5f0ff",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Year
-              </label>
-              <select
-                value={month.slice(0, 4)} // Extract year from YYYY-MM
-                onChange={(e) => {
-                  const newYear = e.target.value;
-                  setMonth(`${newYear}-${month.slice(5, 7)}`); // Reconstruct YYYY-MM
-                }}
-                style={{
-                  padding: "7px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #e5f0ff",
-                  backgroundColor: "rgba(15,23,42,0.15)",
-                  color: "#f9fafb",
-                  minWidth: 100,
-                  fontSize: 12.5,
-                  outline: "none",
-                  cursor: "pointer",
-                }}
-              >
-                {Array.from({ length: 10 }, (_, i) => {
-                  const y = new Date().getFullYear() - 2 + i; // 2 years back, 7 years forward
-                  return <option key={y} value={y}>{y}</option>;
-                })}
-              </select>
-            </div>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  letterSpacing: 1.4,
-                  color: "#e5f0ff",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Month
-              </label>
-              <select
-                value={month.slice(5, 7)} // Extract month from YYYY-MM
-                onChange={(e) => {
-                  const newMonth = e.target.value;
-                  setMonth(`${month.slice(0, 4)}-${newMonth}`); // Reconstruct YYYY-MM
-                }}
-                style={{
-                  padding: "7px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #e5f0ff",
-                  backgroundColor: "rgba(15,23,42,0.15)",
-                  color: "#f9fafb",
-                  minWidth: 120,
-                  fontSize: 12.5,
-                  outline: "none",
-                  cursor: "pointer",
-                }}
-              >
-                {Array.from({ length: 12 }, (_, i) => {
-                  const m = String(i + 1).padStart(2, '0');
-                  const monthName = new Date(0, i).toLocaleString('en-US', { month: 'long' });
-                  return <option key={m} value={m}>{monthName}</option>;
-                })}
-              </select>
-            </div>
+          <div className="employee-header-right" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <ThemeToggle />
+            <select
+              value={month.slice(0, 4)} // Extract year from YYYY-MM
+              onChange={(e) => {
+                const newYear = e.target.value;
+                setMonth(`${newYear}-${month.slice(5, 7)}`); // Reconstruct YYYY-MM
+              }}
+              aria-label="Select Year"
+              title="Select Year"
+              style={{
+                padding: "9px 12px",
+                borderRadius: 8,
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                backgroundColor: theme === 'dark' ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+                color: theme === 'dark' ? '#f1f5f9' : '#0f172a',
+                minWidth: 100,
+                fontSize: 12.5,
+                outline: "none",
+                cursor: "pointer",
+                backdropFilter: "blur(10px)",
+                fontWeight: 500,
+                height: "36px",
+              }}
+            >
+              {Array.from({ length: 10 }, (_, i) => {
+                const y = new Date().getFullYear() - 2 + i; // 2 years back, 7 years forward
+                return <option key={y} value={y}>{y}</option>;
+              })}
+            </select>
+            <select
+              value={month.slice(5, 7)} // Extract month from YYYY-MM
+              onChange={(e) => {
+                const newMonth = e.target.value;
+                setMonth(`${month.slice(0, 4)}-${newMonth}`); // Reconstruct YYYY-MM
+              }}
+              aria-label="Select Month"
+              title="Select Month"
+              style={{
+                padding: "9px 12px",
+                borderRadius: 8,
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                backgroundColor: theme === 'dark' ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+                color: theme === 'dark' ? '#f1f5f9' : '#0f172a',
+                minWidth: 120,
+                fontSize: 12.5,
+                outline: "none",
+                cursor: "pointer",
+                backdropFilter: "blur(10px)",
+                fontWeight: 500,
+                height: "36px",
+              }}
+            >
+              {Array.from({ length: 12 }, (_, i) => {
+                const m = String(i + 1).padStart(2, '0');
+                const monthName = new Date(0, i).toLocaleString('en-US', { month: 'long' });
+                return <option key={m} value={m}>{monthName}</option>;
+              })}
+            </select>
             {canViewSalarySlip && myRecord && (
               <button
                 type="button"
                 onClick={() => setShowSalarySlip(true)}
                 style={{
-                  padding: "9px 22px",
-                  borderRadius: 999,
+                  padding: "9px 18px",
+                  borderRadius: 8,
                   border: "none",
-                  backgroundColor: "#22c55e",
-                  color: "#ffffff",
+                  background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
+                  color: colors.primary[600],
                   fontSize: 12.5,
-                  fontWeight: 700,
+                  fontWeight: 600,
                   cursor: "pointer",
-                  boxShadow: "0 10px 26px rgba(34,197,94,0.4)",
+                  boxShadow: "0 4px 12px rgba(255, 255, 255, 0.3)",
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "center",
                   gap: "6px",
+                  transition: "all 0.2s",
+                  whiteSpace: "nowrap",
+                  height: "36px",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 6px 16px rgba(255, 255, 255, 0.4)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(255, 255, 255, 0.3)";
                 }}
               >
                 💰 Salary Slip
@@ -1379,17 +1523,40 @@ export default function EmployeeDashboardPage() {
             )}
             <button
               type="button"
-              onClick={() => router.push("/login?role=employee")}
+              onClick={async () => {
+                try {
+                  await signOut({ 
+                    redirect: false,
+                    callbackUrl: '/login?role=employee'
+                  });
+                  router.push('/login?role=employee');
+                } catch (error) {
+                  console.error('Logout error:', error);
+                  router.push('/login?role=employee');
+                }
+              }}
               style={{
-                padding: "9px 22px",
-                borderRadius: 999,
-                border: "none",
-                backgroundColor: "rgba(15,23,42,0.4)",
-                color: "#f9fafb",
+                padding: "9px 18px",
+                borderRadius: 8,
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                backgroundColor: "rgba(255, 255, 255, 0.15)",
+                color: "#ffffff",
                 fontSize: 12.5,
-                fontWeight: 700,
+                fontWeight: 600,
                 cursor: "pointer",
-                boxShadow: "0 10px 26px rgba(15,23,42,0.9)",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
+                backdropFilter: "blur(10px)",
+                transition: "all 0.2s",
+                whiteSpace: "nowrap",
+                height: "36px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.25)";
+                e.currentTarget.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.15)";
+                e.currentTarget.style.transform = "translateY(0)";
               }}
             >
               Logout
@@ -1405,24 +1572,24 @@ export default function EmployeeDashboardPage() {
           maxWidth: 1280,
           margin: "0 auto",
           borderRadius: 22,
-          background: "#020617",
-          boxShadow: "0 24px 70px rgba(15,23,42,0.85)",
+          background: colors.gradient.card,
+          boxShadow: colors.card.shadow,
           padding: "18px 20px 22px",
-          border: "1px solid rgba(15,23,42,0.9)",
+          border: `1px solid ${colors.border.default}`,
         }}
       >
         {errorMsg && (
           <div
-            style={{
-              marginBottom: 12,
-              padding: "9px 11px",
-              borderRadius: 12,
-              backgroundColor: "rgba(248,113,113,0.12)",
-              border: "1px solid rgba(220,38,38,0.7)",
-              color: "#fecaca",
-              fontSize: 12,
-            }}
-          >
+              style={{
+                marginBottom: 12,
+                padding: "9px 11px",
+                borderRadius: 12,
+                backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(248,113,113,0.12)',
+                border: `1px solid ${colors.error}`,
+                color: colors.error,
+                fontSize: 12,
+              }}
+            >
             {errorMsg}
           </div>
         )}
@@ -1440,56 +1607,89 @@ export default function EmployeeDashboardPage() {
           {/* PROFILE CARD */}
           <div
             className="employee-profile-card"
-            style={{
-              borderRadius: 18,
-              padding: "14px 16px",
-              background: "linear-gradient(135deg, #19264a, #0c225c, #020617)",
-              border: "1px solid rgba(148,163,184,0.6)",
-              display: "flex",
-              gap: 14,
-            }}
-          >
-            <div className="employee-profile-avatar" style={{ flexShrink: 0 }}>
+              style={{
+                borderRadius: 18,
+                padding: "14px 16px",
+                background: colors.gradient.card,
+                border: `1px solid ${colors.border.default}`,
+                display: "flex",
+                gap: 14,
+              }}
+            >
+            <div className="employee-profile-avatar" style={{ flexShrink: 0, position: 'relative' }}>
               {renderEmployeeAvatar(avatarSource, 88)}
+              <button
+                type="button"
+                onClick={() => setShowEditProfile(true)}
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  right: 0,
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  border: `2px solid ${colors.background.card}`,
+                  backgroundColor: colors.primary[500],
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 14,
+                  boxShadow: `0 2px 8px ${colors.primary[500]}40`,
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.primary[600];
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.primary[500];
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+                title="Edit Profile"
+              >
+                ✏️
+              </button>
             </div>
-            <div>
+            <div style={{ flex: 1 }}>
               <div
-                style={{
-                  fontSize: 17,
-                  fontWeight: 800,
-                  marginBottom: 4,
-                  letterSpacing: 0.3,
-                  color: "#f9fafb",
-                }}
-              >
-                {displayName}
-              </div>
-              <div
-                style={{
-                  fontSize: 12.5,
-                  color: "#e5e7eb",
-                  marginBottom: 6,
-                }}
-              >
-                Emp Code:{" "}
-                <strong style={{ color: "#ffffff" }}>
-                  {empCode || "-"}
-                </strong>
-              </div>
-              <div style={{ fontSize: 12.5, color: "#e5e7eb" }}>
-                Dept:{" "}
-                <strong style={{ color: "#ffffff" }}>{displayDept}</strong>
-              </div>
-              <div style={{ fontSize: 12.5, color: "#e5e7eb" }}>
-                Designation:{" "}
-                <strong style={{ color: "#ffffff" }}>
-                  {displayDesignation}
-                </strong>
-              </div>
-              <div style={{ fontSize: 12.5, color: "#e5e7eb" }}>
-                Shift:{" "}
-                <strong style={{ color: "#ffffff" }}>{displayShift}</strong>
-              </div>
+                  style={{
+                    fontSize: 17,
+                    fontWeight: 800,
+                    marginBottom: 4,
+                    letterSpacing: 0.3,
+                    color: colors.text.primary,
+                  }}
+                >
+                  {displayName}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    color: colors.text.secondary,
+                    marginBottom: 6,
+                  }}
+                >
+                  Emp Code:{" "}
+                  <strong style={{ color: colors.text.primary }}>
+                    {empCode || "-"}
+                  </strong>
+                </div>
+                <div style={{ fontSize: 12.5, color: colors.text.secondary }}>
+                  Dept:{" "}
+                  <strong style={{ color: colors.text.primary }}>{displayDept}</strong>
+                </div>
+                <div style={{ fontSize: 12.5, color: colors.text.secondary }}>
+                  Designation:{" "}
+                  <strong style={{ color: colors.text.primary }}>
+                    {displayDesignation}
+                  </strong>
+                </div>
+                <div style={{ fontSize: 12.5, color: colors.text.secondary }}>
+                  Shift:{" "}
+                  <strong style={{ color: colors.text.primary }}>{displayShift}</strong>
+                </div>
               {loadingEmployee && (
                 <div
                   style={{
@@ -1506,13 +1706,15 @@ export default function EmployeeDashboardPage() {
 
           {/* TODAY CARD */}
           <div
-            style={{
-              borderRadius: 18,
-              padding: "14px 16px",
-              background: "linear-gradient(135deg, #0c225c, #58D34D, #0f766e)",
-              border: "1px solid rgba(34,197,94,0.9)",
-            }}
-          >
+              style={{
+                borderRadius: 18,
+                padding: "14px 16px",
+                background: theme === 'dark' 
+                  ? `linear-gradient(135deg, ${colors.primary[700]}, ${colors.success}, ${colors.primary[800]})`
+                  : `linear-gradient(135deg, ${colors.primary[600]}, ${colors.success}, ${colors.primary[500]})`,
+                border: `1px solid ${colors.success}`,
+              }}
+            >
             <div
               style={{
                 fontSize: 12,
@@ -1597,33 +1799,32 @@ export default function EmployeeDashboardPage() {
         >
           {/* SUMMARY */}
           <div
-            style={{
-              borderRadius: 18,
-              padding: "14px 16px",
-              background:
-                "linear-gradient(135deg, #020617, #19264a, #0c225c)",
-              border: "1px solid rgba(55,65,81,0.9)",
-            }}
-          >
-            <div
               style={{
-                fontSize: 14.5,
-                marginBottom: 8,
-                fontWeight: 600,
-                color: "#f9fafb",
+                borderRadius: 18,
+                padding: "14px 16px",
+                background: colors.gradient.card,
+                border: `1px solid ${colors.border.default}`,
               }}
             >
-              Monthly Summary
-            </div>
-            {loading ? (
-              <div style={{ fontSize: 12.5, color: "#9ca3af" }}>
-                Loading monthly attendance…
+              <div
+                style={{
+                  fontSize: 14.5,
+                  marginBottom: 8,
+                  fontWeight: 600,
+                  color: colors.text.primary,
+                }}
+              >
+                Monthly Summary
               </div>
-            ) : !myRecord ? (
-              <div style={{ fontSize: 12.5, color: "#9ca3af" }}>
-                No data found for this month.
-              </div>
-            ) : (
+              {loading ? (
+                <div style={{ fontSize: 12.5, color: colors.text.tertiary }}>
+                  Loading monthly attendance…
+                </div>
+              ) : !myRecord ? (
+                <div style={{ fontSize: 12.5, color: colors.text.tertiary }}>
+                  No data found for this month.
+                </div>
+              ) : (
               <>
                 <div
                   className="employee-summary-grid"
@@ -1706,52 +1907,53 @@ export default function EmployeeDashboardPage() {
 
           {/* DAY-BY-DAY */}
           <div
-            style={{
-              borderRadius: 18,
-              padding: "12px 14px",
-              background:
-                "linear-gradient(135deg, #020617, #0c225c, #19264a)",
-              border: "1px solid rgba(55,65,81,0.9)",
-            }}
-          >
-            <div
               style={{
-                fontSize: 14.5,
-                marginBottom: 8,
-                fontWeight: 600,
-                color: "#f9fafb",
+                borderRadius: 18,
+                padding: "12px 14px",
+                background: colors.gradient.card,
+                border: `1px solid ${colors.border.default}`,
               }}
             >
-              Day-by-day attendance
-            </div>
-            <div
-              className="employee-table-wrapper"
-              style={{
-                maxHeight: "440px",
-                overflowY: "auto",
-                overflowX: "auto",
-                borderRadius: 12,
-                border: "1px solid rgba(31,41,55,0.95)",
-              }}
-            >
-              <table
+              <div
+                style={{
+                  fontSize: 14.5,
+                  marginBottom: 8,
+                  fontWeight: 600,
+                  color: colors.text.primary,
+                }}
+              >
+                Day-by-day attendance
+              </div>
+              <div
+                className="employee-table-wrapper"
+                style={{
+                  maxHeight: "440px",
+                  overflowY: "auto",
+                  overflowX: "auto",
+                  borderRadius: 12,
+                  border: `1px solid ${colors.border.table}`,
+                  backgroundColor: colors.background.table.row,
+                }}
+              >
+                <table
                 className="employee-table"
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
                   fontSize: 11.5,
                   minWidth: 500,
+                  backgroundColor: colors.background.table.row,
                 }}
               >
                 <thead>
-                  <tr style={{ backgroundColor: "#0b1120" }}>
+                  <tr style={{ backgroundColor: colors.background.table.header }}>
                     <th
                       style={{
                         padding: "7px 8px",
                         textAlign: "left",
-                        borderBottom: "1px solid #1f2937",
+                        borderBottom: `1px solid ${colors.border.table}`,
                         fontWeight: 600,
-                        color: "#e5e7eb",
+                        color: colors.text.table.header,
                       }}
                     >
                       Day
@@ -1760,9 +1962,9 @@ export default function EmployeeDashboardPage() {
                       style={{
                         padding: "7px 8px",
                         textAlign: "left",
-                        borderBottom: "1px solid #1f2937",
+                        borderBottom: `1px solid ${colors.border.table}`,
                         fontWeight: 600,
-                        color: "#e5e7eb",
+                        color: colors.text.table.header,
                       }}
                     >
                       Status
@@ -1771,9 +1973,9 @@ export default function EmployeeDashboardPage() {
                       style={{
                         padding: "7px 8px",
                         textAlign: "left",
-                        borderBottom: "1px solid #1f2937",
+                        borderBottom: `1px solid ${colors.border.table}`,
                         fontWeight: 600,
-                        color: "#e5e7eb",
+                        color: colors.text.table.header,
                       }}
                     >
                       In / Out
@@ -1782,9 +1984,9 @@ export default function EmployeeDashboardPage() {
                       style={{
                         padding: "7px 8px",
                         textAlign: "left",
-                        borderBottom: "1px solid #1f2937",
+                        borderBottom: `1px solid ${colors.border.table}`,
                         fontWeight: 600,
-                        color: "#e5e7eb",
+                        color: colors.text.table.header,
                       }}
                     >
                       Flags
@@ -1799,7 +2001,7 @@ export default function EmployeeDashboardPage() {
                         style={{
                           padding: "9px 10px",
                           textAlign: "center",
-                          color: "#6b7280",
+                          color: colors.text.tertiary,
                         }}
                       >
                         No attendance records found.
@@ -1812,7 +2014,7 @@ export default function EmployeeDashboardPage() {
                       const isToday =
                         todayDayObj && d.date === todayDayObj.date;
 
-                      const classInfo = classifyDayForRow(d);
+                      const classInfo = classifyDayForRow(d, colors, theme);
 
                       let statusLabel = d.status || "—";
                       let inTime = d.checkIn
@@ -1868,15 +2070,15 @@ export default function EmployeeDashboardPage() {
                           key={d.date || idx}
                           style={{
                             backgroundColor: isFuture
-                              ? "#020617"
+                              ? colors.background.primary
                               : classInfo.bg,
                           }}
                         >
                           <td
                             style={{
                               padding: "6px 8px",
-                              borderBottom: "1px solid #111827",
-                              color: isToday ? "#22c55e" : "#e5e7eb",
+                              borderBottom: `1px solid ${colors.border.table}`,
+                              color: isToday ? colors.success : colors.text.table.cell,
                               fontWeight: isToday ? 700 : 500,
                             }}
                           >
@@ -1885,8 +2087,8 @@ export default function EmployeeDashboardPage() {
                           <td
                             style={{
                               padding: "6px 8px",
-                              borderBottom: "1px solid #111827",
-                              color: isFuture ? "#fbbf24" : classInfo.fg,
+                              borderBottom: `1px solid ${colors.border.table}`,
+                              color: isFuture ? colors.warning : classInfo.fg,
                               fontStyle: isFuture ? "italic" : "normal",
                             }}
                           >
@@ -1895,8 +2097,8 @@ export default function EmployeeDashboardPage() {
                           <td
                             style={{
                               padding: "6px 8px",
-                              borderBottom: "1px solid #111827",
-                              color: "#9ca3af",
+                              borderBottom: `1px solid ${colors.border.table}`,
+                              color: colors.text.tertiary,
                             }}
                           >
                             {inOutLabel}
@@ -1904,8 +2106,8 @@ export default function EmployeeDashboardPage() {
                           <td
                             style={{
                               padding: "6px 8px",
-                              borderBottom: "1px solid #111827",
-                              color: isFuture ? "#6b7280" : "#f97373",
+                              borderBottom: `1px solid ${colors.border.table}`,
+                              color: isFuture ? colors.text.tertiary : colors.error,
                             }}
                           >
                             {flags.length ? flags.join(", ") : "—"}
@@ -1932,6 +2134,66 @@ export default function EmployeeDashboardPage() {
         month={salarySlipMonth || month}
         loading={loadingSalarySlip}
       />
+
+      {/* Edit Profile Modal */}
+      <Modal
+        isOpen={showEditProfile}
+        onClose={() => {
+          setShowEditProfile(false);
+          setErrorMsg('');
+          setSuccessMsg('');
+        }}
+        title="Edit Profile"
+        size="medium"
+      >
+        {successMsg && (
+          <div style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            borderRadius: 8,
+            backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.1)',
+            border: `1px solid ${colors.success}`,
+            color: colors.success,
+            fontSize: 13,
+            fontWeight: 500,
+          }}>
+            {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            borderRadius: 8,
+            backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(248,113,113,0.12)',
+            border: `1px solid ${colors.error}`,
+            color: colors.error,
+            fontSize: 13,
+            fontWeight: 500,
+          }}>
+            {errorMsg}
+          </div>
+        )}
+        <EmployeeProfileEdit
+          employee={employee || myRecord}
+          onSave={handleProfileUpdate}
+          onCancel={() => {
+            setShowEditProfile(false);
+            setErrorMsg('');
+            setSuccessMsg('');
+          }}
+          loading={savingProfile}
+        />
+      </Modal>
+
+      {/* Auto Logout Warning */}
+      {showWarning && (
+        <AutoLogoutWarning
+          timeRemaining={timeRemaining}
+          onStayLoggedIn={handleStayLoggedIn}
+          onLogout={autoLogout}
+        />
+      )}
     </div>
   );
 }

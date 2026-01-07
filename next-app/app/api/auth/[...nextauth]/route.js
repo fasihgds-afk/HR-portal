@@ -22,7 +22,12 @@ export const authOptions = {
         cnic: { label: "CNIC", type: "text" }, // kept here but NOT used now
       },
       async authorize(credentials) {
-        await connectDB();
+        try {
+          await connectDB();
+        } catch (error) {
+          console.error('[NextAuth] Database connection error:', error);
+          return null;
+        }
 
         const { mode, email, password, empCode } = credentials;
 

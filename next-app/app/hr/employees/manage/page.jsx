@@ -1,7 +1,14 @@
 // next-app/app/hr/employees/page.jsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import EmployeeTable from '../../../../components/employees/EmployeeTable';
+import EmployeeFilters from '../../../../components/employees/EmployeeFilters';
+import PaginationControls from '../../../../components/common/PaginationControls';
+import EmployeeForm from '../../../../components/employees/EmployeeForm';
+import Modal from '../../../../components/ui/Modal';
+import Toast from '../../../../components/common/Toast';
+import ConfirmDialog from '../../../../components/ui/ConfirmDialog';
 
 const thStyle = {
   padding: '10px 12px',
@@ -42,28 +49,32 @@ export default function EmployeeShiftPage() {
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState(null);
   const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
+  const [searchQuery, setSearchQuery] = useState(''); // Search query
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0,
+    totalPages: 1,
+  });
 
   const [toast, setToast] = useState({ type: '', text: '' });
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalEmp, setModalEmp] = useState(null);
+  // Modal states
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    isOpen: false,
+    employee: null,
+  });
+
+  // Shift history for modal (if needed)
   const [shiftHistory, setShiftHistory] = useState([]);
   const [showShiftHistory, setShowShiftHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
-
-  const [newEmp, setNewEmp] = useState({
-    empCode: '',
-    name: '',
-    email: '',
-    monthlySalary: '',
-    shift: '',
-    department: '',
-    designation: '',
-    phoneNumber: '',
-    cnic: '',
-    profileImageBase64: '',
-    profileImageUrl: '',
-  });
 
   // --- helpers --------------------------------------------------------------
 
@@ -90,13 +101,27 @@ export default function EmployeeShiftPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/employee');
+      // Build query parameters
+      const params = new URLSearchParams();
+      params.set('page', currentPage.toString());
+      params.set('limit', '50'); // 50 employees per page
+      if (searchQuery) {
+        params.set('search', searchQuery);
+      }
+      if (selectedShift) {
+        params.set('shift', selectedShift);
+      }
+
+      const res = await fetch(`/api/employee?${params.toString()}`);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Failed to load employees (${res.status})`);
       }
       const data = await res.json();
       setEmployees(data.items || []);
+      if (data.pagination) {
+        setPagination(data.pagination);
+      }
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to load employees');
@@ -107,8 +132,13 @@ export default function EmployeeShiftPage() {
 
   useEffect(() => {
     loadShifts();
-    loadEmployees();
   }, []);
+
+  // Reload employees when page, search, or shift filter changes
+  useEffect(() => {
+    loadEmployees();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, searchQuery, selectedShift]);
 
   function handleShiftChange(index, newShift) {
     setEmployees((prev) => {
@@ -166,35 +196,28 @@ export default function EmployeeShiftPage() {
     }
   }
 
-  function handleNewEmpChange(field, value) {
-    setNewEmp((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+  // Open modal for adding new employee
+  function openAddModal() {
+    setEditingEmployee(null);
+    setIsModalOpen(true);
   }
 
-  async function handleAddOrUpdateEmployee() {
+  // Handle form submission (both add and edit) - used by EmployeeForm component
+  async function handleFormSubmit(formData) {
+    setIsSaving(true);
     try {
-      if (!newEmp.empCode.trim()) {
-        showToast('error', 'Emp Code is required');
-        return;
-      }
-
       const body = {
-        empCode: newEmp.empCode.trim(),
-        name: newEmp.name || undefined,
-        email: newEmp.email || undefined,
-        monthlySalary:
-          newEmp.monthlySalary !== ''
-            ? Number(newEmp.monthlySalary)
-            : undefined,
-        shift: newEmp.shift || '',
-        department: newEmp.department || undefined,
-        designation: newEmp.designation || undefined,
-        phoneNumber: newEmp.phoneNumber || undefined,
-        cnic: newEmp.cnic || undefined,
-        profileImageBase64: newEmp.profileImageBase64 || undefined,
-        profileImageUrl: newEmp.profileImageUrl || undefined,
+        empCode: formData.empCode.trim(),
+        name: formData.name || undefined,
+        email: formData.email || undefined,
+        monthlySalary: formData.monthlySalary ? Number(formData.monthlySalary) : undefined,
+        shift: formData.shift || '',
+        department: formData.department || undefined,
+        designation: formData.designation || undefined,
+        phoneNumber: formData.phoneNumber || undefined,
+        cnic: formData.cnic || undefined,
+        profileImageBase64: formData.profileImageBase64 || undefined,
+        profileImageUrl: formData.profileImageUrl || undefined,
       };
 
       const res = await fetch('/api/employee', {
@@ -205,11 +228,12 @@ export default function EmployeeShiftPage() {
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `Failed to add/update employee (${res.status})`);
+        throw new Error(text || `Failed to save employee (${res.status})`);
       }
 
       const data = await res.json();
 
+      // Update employees list
       setEmployees((prev) => {
         const exists = prev.some((e) => e.empCode === data.employee.empCode);
         if (exists) {
@@ -222,27 +246,19 @@ export default function EmployeeShiftPage() {
         );
       });
 
-      showToast(
-        'success',
-        `Employee ${data.employee.empCode} saved (shift ${data.employee.shift})`
+      showToast('success', editingEmployee 
+        ? `Employee ${data.employee.empCode} updated successfully`
+        : `Employee ${data.employee.empCode} added successfully`
       );
 
-      setNewEmp({
-        empCode: '',
-        name: '',
-        email: '',
-        monthlySalary: '',
-        shift: '',
-        department: '',
-        designation: '',
-        phoneNumber: '',
-        cnic: '',
-        profileImageBase64: '',
-        profileImageUrl: '',
-      });
+      setIsModalOpen(false);
+      setEditingEmployee(null);
+      loadEmployees(); // Refresh to get updated data
     } catch (err) {
       console.error(err);
-      showToast('error', err.message || 'Failed to add/update employee');
+      showToast('error', err.message || 'Failed to save employee');
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -315,159 +331,28 @@ export default function EmployeeShiftPage() {
     }
   }
 
+  // Open modal for editing existing employee
   function openEditModal(emp) {
-    setModalEmp({
-      empCode: emp.empCode,
-      name: emp.name || '',
-      email: emp.email || '',
-      monthlySalary:
-        emp.monthlySalary != null ? String(emp.monthlySalary) : '',
-      shift: emp.shift || '',
-      department: emp.department || '',
-      designation: emp.designation || '',
-      phoneNumber: emp.phoneNumber || '',
-      cnic: emp.cnic || '',
-      profileImageBase64: emp.profileImageBase64 || '',
-      profileImageUrl: emp.profileImageUrl || '',
-    });
-    setModalOpen(true);
+    setEditingEmployee(emp);
+    setIsModalOpen(true);
     setShowShiftHistory(false);
     loadShiftHistory(emp.empCode);
   }
 
+  // Close modal
   function closeModal() {
-    setModalOpen(false);
-    setModalEmp(null);
+    setIsModalOpen(false);
+    setEditingEmployee(null);
     setShowShiftHistory(false);
     setShiftHistory([]);
   }
 
-  // convert selected file to base64 and store in modalEmp
-  function handleModalImageChange(e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-
-    if (file.size > 1024 * 1024) {
-      showToast('error', 'Image too large. Please use a file under 1MB.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      if (typeof result === 'string') {
-        setModalEmp((prev) => ({
-          ...prev,
-          profileImageBase64: result,
-          profileImageUrl: result, // use same base64 as src
-        }));
-      }
-    };
-    reader.readAsDataURL(file);
-  }
-
-  async function handleModalSave() {
-    if (!modalEmp) return;
-
-    try {
-      const res = await fetch('/api/employee', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          empCode: modalEmp.empCode,
-          name: modalEmp.name,
-          email: modalEmp.email,
-          monthlySalary:
-            modalEmp.monthlySalary !== ''
-              ? Number(modalEmp.monthlySalary)
-              : undefined,
-          shift: modalEmp.shift || '',
-          department: modalEmp.department,
-          designation: modalEmp.designation,
-          phoneNumber: modalEmp.phoneNumber,
-          cnic: modalEmp.cnic,
-          profileImageBase64: modalEmp.profileImageBase64 || undefined,
-          profileImageUrl: modalEmp.profileImageUrl || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to save employee (${res.status})`);
-      }
-
-      const data = await res.json();
-
-      setEmployees((prev) =>
-        prev.map((e) =>
-          e.empCode === data.employee.empCode ? data.employee : e
-        )
-      );
-
-      showToast(
-        'success',
-        `Updated ${data.employee.empCode} (${data.employee.name || 'No name'})`
-      );
-      closeModal();
-    } catch (err) {
-      console.error(err);
-      showToast('error', err.message || 'Failed to save employee');
-    }
-  }
-
-  // small helper for avatar
-  function renderAvatar(emp) {
-    const src = emp.profileImageUrl || emp.profileImageBase64 || '';
-    const initials =
-      (emp.name || '')
-        .split(' ')
-        .map((p) => p[0])
-        .join('')
-        .slice(0, 2)
-        .toUpperCase() || '?';
-
-    if (src) {
-      return (
-        <img
-          src={src}
-          alt={emp.name || emp.empCode}
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: '999px',
-            objectFit: 'cover',
-            border: '1px solid #e5e7eb',
-          }}
-        />
-      );
-    }
-
-    return (
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: '999px',
-          background:
-            'linear-gradient(135deg, #2563eb, #38bdf8)',
-          color: '#f9fafb',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        {initials}
-      </div>
-    );
-  }
 
   // ------------------------------------------------------------------------
 
   return (
-    <>
-      <style jsx>{`
+    <React.Fragment>
+      <style>{`
         @media (max-width: 768px) {
           .manage-container {
             padding: 16px !important;
@@ -641,266 +526,87 @@ export default function EmployeeShiftPage() {
             </div>
           </div>
 
-          <button
-            onClick={loadEmployees}
-            disabled={loading}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 999,
-              border: 'none',
-              backgroundColor: 'rgba(15,23,42,0.28)',
-              color: '#e5f2ff',
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: loading ? 'default' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            {loading ? (
-              <>
-                <span
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '999px',
-                    border: '2px solid rgba(191,219,254,0.6)',
-                    borderTopColor: '#ffffff',
-                    animation: 'spin 0.7s linear infinite',
-                  }}
-                />
-                Refreshing…
-              </>
-            ) : (
-              <>
-                <span>⟳</span> Refresh
-              </>
-            )}
-          </button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              onClick={loadEmployees}
+              disabled={loading}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 999,
+                border: 'none',
+                backgroundColor: 'rgba(15,23,42,0.28)',
+                color: '#e5f2ff',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: loading ? 'default' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              {loading ? (
+                <>
+                  <span
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '999px',
+                      border: '2px solid rgba(191,219,254,0.6)',
+                      borderTopColor: '#ffffff',
+                      animation: 'spin 0.7s linear infinite',
+                    }}
+                  />
+                  Refreshing…
+                </>
+              ) : (
+                <>
+                  <span>⟳</span> Refresh
+                </>
+              )}
+            </button>
+            
+            {/* Add Employee Button */}
+            <button
+              onClick={openAddModal}
+              style={{
+                padding: '8px 20px',
+                borderRadius: 999,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10b981, #22c55e)',
+                color: '#ffffff',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)';
+              }}
+            >
+              <span style={{ fontSize: 18 }}>+</span> Add Employee
+            </button>
+          </div>
         </div>
 
         {/* MAIN CARD */}
         <div
           style={{
-            borderRadius: 14,
-            backgroundColor: '#f3f6fb',
-            boxShadow: '0 16px 34px rgba(15,23,42,0.45)',
-            padding: '18px 20px 20px',
+            borderRadius: 16,
+            backgroundColor: '#ffffff',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            padding: '24px 28px 28px',
+            border: '1px solid #e5e7eb',
           }}
         >
-          {/* Add / Update section */}
-          <div style={{ marginBottom: 18 }}>
-            <h2
-              style={{
-                fontSize: 18,
-                fontWeight: 700,
-                color: '#0f172a',
-                marginBottom: 4,
-              }}
-            >
-              Add / Update Employee
-            </h2>
-            <p
-              style={{
-                fontSize: 12,
-                color: '#4b5563',
-                marginBottom: 12,
-              }}
-            >
-              HR can create a new employee or update an existing one. Select a shift from the dropdown.
-            </p>
-
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 12,
-                alignItems: 'flex-end',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Emp Code *
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 120 }}
-                  value={newEmp.empCode}
-                  onChange={(e) =>
-                    handleNewEmpChange('empCode', e.target.value.trim())
-                  }
-                  placeholder="e.g. 125723"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Name
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 160 }}
-                  value={newEmp.name}
-                  onChange={(e) =>
-                    handleNewEmpChange('name', e.target.value)
-                  }
-                  placeholder="Employee name"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Phone Number
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 150 }}
-                  value={newEmp.phoneNumber}
-                  onChange={(e) =>
-                    handleNewEmpChange('phoneNumber', e.target.value)
-                  }
-                  placeholder="03XXXXXXXXX"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  CNIC
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 150 }}
-                  value={newEmp.cnic}
-                  onChange={(e) =>
-                    handleNewEmpChange('cnic', e.target.value)
-                  }
-                  placeholder="XXXXX-XXXXXXX-X"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Department
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 150 }}
-                  value={newEmp.department}
-                  onChange={(e) =>
-                    handleNewEmpChange('department', e.target.value)
-                  }
-                  placeholder="e.g. IT, HR"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Designation
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 150 }}
-                  value={newEmp.designation}
-                  onChange={(e) =>
-                    handleNewEmpChange('designation', e.target.value)
-                  }
-                  placeholder="e.g. Manager"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Email
-                </label>
-                <input
-                  style={{ ...inputStyle, minWidth: 220 }}
-                  value={newEmp.email}
-                  onChange={(e) =>
-                    handleNewEmpChange('email', e.target.value)
-                  }
-                  placeholder="email@example.com"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Monthly Salary
-                </label>
-                <input
-                  type="number"
-                  style={{ ...inputStyle, minWidth: 130 }}
-                  value={newEmp.monthlySalary}
-                  onChange={(e) =>
-                    handleNewEmpChange('monthlySalary', e.target.value)
-                  }
-                  placeholder="e.g. 45000"
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Shift
-                </label>
-                <select
-                  style={selectStyle}
-                  value={newEmp.shift}
-                  onChange={(e) => handleNewEmpChange('shift', e.target.value)}
-                >
-                  <option value="">Select Shift</option>
-                  {shifts.length > 0 ? (
-                    shifts.map((shift) => (
-                      <option key={shift._id} value={shift.code}>
-                        {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="" disabled>No shifts available. Please create shifts first.</option>
-                  )}
-                </select>
-              </div>
-
-              <button
-                onClick={handleAddOrUpdateEmployee}
-                style={{
-                  padding: '9px 20px',
-                  borderRadius: 999,
-                  border: 'none',
-                  background:
-                    'linear-gradient(135deg, #10b981, #22c55e, #2dd4bf)',
-                  color: '#022c22',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 24px rgba(16,185,129,0.4)',
-                }}
-              >
-                Save Employee
-              </button>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div
-            style={{
-              height: 1,
-              background:
-                'linear-gradient(90deg, transparent, #cbd5f5, transparent)',
-              margin: '4px 0 10px',
-            }}
-          />
 
           {/* Existing employees table */}
           <div>
@@ -917,652 +623,123 @@ export default function EmployeeShiftPage() {
               <div>
                 <h2
                   style={{
-                    fontSize: 16,
+                    fontSize: 20,
                     fontWeight: 700,
-                    color: '#0f172a',
-                    marginBottom: 2,
+                    color: '#111827',
+                    marginBottom: 6,
+                    letterSpacing: '-0.025em',
                   }}
                 >
-                  Existing Employees
+                  Employee Directory
                 </h2>
                 <p
                   style={{
-                    fontSize: 11,
+                    fontSize: 13,
                     color: '#6b7280',
+                    margin: 0,
                   }}
                 >
-                  Double-click a row or click{' '}
-                  <span style={{ color: '#0f766e' }}>Edit</span> to open full
-                  details.
+                  Manage employee information, shifts, and details. Double-click a row or click{' '}
+                  <span style={{ color: '#0ea5e9', fontWeight: 600 }}>Edit</span> to open full details.
                 </p>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label
-                  style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}
-                >
-                  Filter by Shift
-                </label>
-                <select
-                  style={selectStyle}
-                  value={selectedShift}
-                  onChange={(e) => setSelectedShift(e.target.value)}
-                >
-                  <option value="">All Shifts</option>
-                  <option value="">Select Shift</option>
-                  {shifts.length > 0 ? (
-                    shifts.map((shift) => (
-                      <option key={shift._id} value={shift.code}>
-                        {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="" disabled>No shifts available. Please create shifts first.</option>
-                  )}
-                </select>
-              </div>
+              <EmployeeFilters
+                searchQuery={searchQuery}
+                selectedShift={selectedShift}
+                shifts={shifts}
+                onSearchChange={(value) => {
+                  setSearchQuery(value);
+                  setCurrentPage(1);
+                }}
+                onShiftChange={(value) => {
+                  setSelectedShift(value);
+                  setCurrentPage(1);
+                }}
+              />
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table
-                style={{
-                  width: '100%',
-                  minWidth: 1150,
-                  borderCollapse: 'collapse',
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                }}
-              >
-                <thead>
-                  <tr>
-                    <th style={{ ...thStyle, width: 60 }}>Avatar</th>
-                    <th style={thStyle}>Emp Code</th>
-                    <th style={thStyle}>Name</th>
-                    <th style={thStyle}>Department</th>
-                    <th style={thStyle}>Designation</th>
-                    <th style={thStyle}>Phone</th>
-                    <th style={thStyle}>CNIC</th>
-                    <th style={thStyle}>Email</th>
-                    <th style={thStyle}>Monthly Salary</th>
-                    <th style={thStyle}>Shift</th>
-                    <th style={thStyle}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {employees.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={11}
-                        style={{
-                          ...tdStyle,
-                          textAlign: 'center',
-                          color: '#6b7280',
-                          backgroundColor: '#f9fafb',
-                          padding: '14px 12px',
-                        }}
-                      >
-                        {loading
-                          ? 'Loading employees…'
-                          : 'No employees found.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    employees
-                      .filter((emp) => !selectedShift || emp.shift === selectedShift)
-                      .map((emp, idx) => (
-                      <tr
-                        key={emp._id || emp.empCode}
-                        onDoubleClick={() => openEditModal(emp)}
-                        style={{
-                          cursor: 'pointer',
-                          backgroundColor:
-                            idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
-                        }}
-                      >
-                        <td style={{ ...tdStyle, width: 60 }}>
-                          {renderAvatar(emp)}
-                        </td>
-                        <td style={tdStyle}>{emp.empCode}</td>
-                        <td style={tdStyle}>{emp.name || '-'}</td>
-                        <td style={tdStyle}>{emp.department || '-'}</td>
-                        <td style={tdStyle}>{emp.designation || '-'}</td>
-                        <td style={tdStyle}>{emp.phoneNumber || '-'}</td>
-                        <td style={tdStyle}>{emp.cnic || '-'}</td>
-                        <td style={tdStyle}>{emp.email || '-'}</td>
-                        <td style={tdStyle}>
-                          {emp.monthlySalary != null ? emp.monthlySalary : '-'}
-                        </td>
-                        <td style={tdStyle}>
-                          <select
-                            style={selectStyle}
-                            value={emp.shift || ''}
-                            onChange={(e) =>
-                              handleShiftChange(idx, e.target.value)
-                            }
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <option value="">Select Shift</option>
-                            {shifts.length > 0 ? (
-                              shifts.map((shift) => (
-                                <option key={shift._id} value={shift.code}>
-                                  {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-                                </option>
-                              ))
-                            ) : (
-                              <option value="" disabled>No shifts available. Please create shifts first.</option>
-                            )}
-                          </select>
-                        </td>
-                        <td style={tdStyle}>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openEditModal(emp);
-                              }}
-                              style={{
-                                padding: '5px 10px',
-                                borderRadius: 999,
-                                border: 'none',
-                                backgroundColor: '#0ea5e9',
-                                color: '#f9fafb',
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSaveRow(emp);
-                              }}
-                              disabled={
-                                savingId === (emp._id || emp.empCode)
-                              }
-                              style={{
-                                padding: '5px 10px',
-                                borderRadius: 999,
-                                border: 'none',
-                                backgroundColor: '#2563eb',
-                                color: '#f9fafb',
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor:
-                                  savingId === (emp._id || emp.empCode)
-                                    ? 'default'
-                                    : 'pointer',
-                                opacity:
-                                  savingId === (emp._id || emp.empCode)
-                                    ? 0.7
-                                    : 1,
-                              }}
-                            >
-                              {savingId === (emp._id || emp.empCode)
-                                ? 'Saving…'
-                                : 'Save'}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <EmployeeTable
+              employees={employees}
+              shifts={shifts}
+              loading={loading}
+              savingId={savingId}
+              onShiftChange={handleShiftChange}
+              onEdit={openEditModal}
+              onSave={handleSaveRow}
+              onDelete={(emp) => setDeleteConfirm({ isOpen: true, employee: emp })}
+            />
+
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={pagination.totalPages}
+              totalItems={pagination.total}
+              itemsPerPage={pagination.limit}
+              onPageChange={setCurrentPage}
+              loading={loading}
+            />
           </div>
         </div>
       </div>
+      </div>
 
-      {/* Toast popup */}
-      {toast.text && (
-        <div
-          style={{
-            position: 'fixed',
-            right: 18,
-            bottom: 20,
-            padding: '10px 14px',
-            borderRadius: 12,
-            backgroundColor:
-              toast.type === 'error'
-                ? 'rgba(248,113,113,0.12)'
-                : 'rgba(16,185,129,0.14)',
-            border:
-              toast.type === 'error'
-                ? '1px solid rgba(220,38,38,0.6)'
-                : '1px solid rgba(16,185,129,0.7)',
-            color: toast.type === 'error' ? '#b91c1c' : '#065f46',
-            fontSize: 13,
-            boxShadow: '0 12px 24px rgba(15,23,42,0.6)',
-            backdropFilter: 'blur(10px)',
-            animation: 'toastIn 0.2s ease-out',
-            maxWidth: 320,
-            backgroundClip: 'padding-box',
-            zIndex: 60,
-          }}
-        >
-          {toast.text}
-        </div>
-      )}
+      {/* Professional Toast Notification */}
+      <Toast
+        type={toast.type}
+        message={toast.text}
+        onClose={() => setToast({ type: '', text: '' })}
+      />
 
-      {/* Edit modal */}
-      {modalOpen && modalEmp && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15,23,42,0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 50,
-          }}
-          onClick={closeModal}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: 860,
-              borderRadius: 20,
-              backgroundColor: '#f9fafb',
-              border: '1px solid #bfdbfe',
-              boxShadow: '0 24px 60px rgba(15,23,42,0.6)',
-              padding: '18px 22px 18px',
-              animation: 'modalIn 0.22s ease-out',
-              color: '#0f172a',
-              maxHeight: '85vh',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            {/* Header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 12,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {renderAvatar(modalEmp)}
-                <div>
-                  <h3
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                    }}
-                  >
-                    Edit Employee
-                  </h3>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: '#6b7280',
-                    }}
-                  >
-                    Emp Code: <strong>{modalEmp.empCode}</strong>
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={closeModal}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#9ca3af',
-                  fontSize: 18,
-                  cursor: 'pointer',
-                }}
-              >
-                ✕
-              </button>
-            </div>
+      {/* Professional Modal for Add/Edit Employee */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        title={editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+        size="lg"
+      >
+        <EmployeeForm
+          employee={editingEmployee}
+          shifts={shifts}
+          onSubmit={handleFormSubmit}
+          onCancel={closeModal}
+          loading={isSaving}
+        />
+      </Modal>
 
-            {/* Scrollable body */}
-            <div
-              style={{
-                overflowY: 'auto',
-                paddingRight: 4,
-              }}
-            >
-              {/* Profile image upload */}
-              <div
-                style={{
-                  marginBottom: 12,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  backgroundColor: '#eff6ff',
-                  border: '1px dashed #bfdbfe',
-                }}
-              >
-                <label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    display: 'block',
-                    marginBottom: 4,
-                  }}
-                >
-                  Profile Photo
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleModalImageChange}
-                  style={{
-                    fontSize: 12,
-                    marginBottom: 4,
-                  }}
-                />
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#6b7280',
-                  }}
-                >
-                  Recommended: square image, clear face, under 1MB.
-                </div>
-                {modalEmp.profileImageBase64 && (
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontSize: 11,
-                      color: '#16a34a',
-                      fontWeight: 600,
-                    }}
-                  >
-                    Photo attached
-                  </div>
-                )}
-              </div>
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, employee: null })}
+        onConfirm={async () => {
+          if (!deleteConfirm.employee) return;
 
-              {/* Form fields grid */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 12,
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>Name</label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.name}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        name: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
+          try {
+            const empCode = deleteConfirm.employee.empCode;
+            const res = await fetch(`/api/employee?empCode=${empCode}`, {
+              method: 'DELETE',
+            });
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>
-                    Department
-                  </label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.department}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        department: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
+            if (!res.ok) {
+              const text = await res.text();
+              throw new Error(text || `Failed to delete employee (${res.status})`);
+            }
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>
-                    Designation
-                  </label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.designation}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        designation: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
+            // Remove from local state
+            setEmployees((prev) => prev.filter((e) => e.empCode !== empCode));
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>Email</label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.email}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        email: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>Phone</label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.phoneNumber}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        phoneNumber: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>CNIC</label>
-                  <input
-                    style={inputStyle}
-                    value={modalEmp.cnic}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        cnic: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>
-                    Monthly Salary
-                  </label>
-                  <input
-                    type="number"
-                    style={inputStyle}
-                    value={modalEmp.monthlySalary}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        monthlySalary: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600 }}>Shift</label>
-                  <select
-                    style={selectStyle}
-                    value={modalEmp.shift}
-                    onChange={(e) =>
-                      setModalEmp((prev) => ({
-                        ...prev,
-                        shift: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">Select Shift</option>
-                    {shifts.length > 0 ? (
-                      shifts.map((shift) => (
-                        <option key={shift._id} value={shift.code}>
-                          {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-                        </option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No shifts available. Please create shifts first.</option>
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {/* Shift History Section */}
-              <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid #e5e7eb' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                    Shift History
-                  </h3>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      onClick={() => autoDetectShifts(modalEmp.empCode)}
-                      disabled={loadingHistory}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #3b82f6',
-                        backgroundColor: '#eff6ff',
-                        color: '#3b82f6',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: loadingHistory ? 'not-allowed' : 'pointer',
-                        opacity: loadingHistory ? 0.6 : 1,
-                      }}
-                    >
-                      {loadingHistory ? 'Detecting...' : 'Auto-Detect from Attendance'}
-                    </button>
-                    <button
-                      onClick={() => setShowShiftHistory(!showShiftHistory)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #d1d5db',
-                        backgroundColor: showShiftHistory ? '#f3f4f6' : '#ffffff',
-                        color: '#374151',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {showShiftHistory ? 'Hide' : 'Show'} History
-                    </button>
-                  </div>
-                </div>
-
-                {showShiftHistory && (
-                  <div style={{ marginTop: 12 }}>
-                    {loadingHistory ? (
-                      <div style={{ padding: 20, textAlign: 'center', color: '#6b7280' }}>
-                        Loading shift history...
-                      </div>
-                    ) : shiftHistory.length === 0 ? (
-                      <div style={{ padding: 20, textAlign: 'center', color: '#6b7280', backgroundColor: '#f9fafb', borderRadius: 8 }}>
-                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>No shift history found.</p>
-                        <p style={{ margin: '4px 0', fontSize: 12, color: '#9ca3af' }}>
-                          Click "Auto-Detect from Attendance" to create history from existing records.
-                        </p>
-                        <p style={{ margin: '8px 0 0', fontSize: 11, color: '#d1d5db', fontStyle: 'italic' }}>
-                          Note: Make sure shifts are created in the system first. Visit{' '}
-                          <a 
-                            href="/hr/shifts" 
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: '#3b82f6', textDecoration: 'underline' }}
-                          >
-                            Shift Management
-                          </a>
-                          {' '}to create shifts, then attendance records must have shift codes stored.
-                        </p>
-                      </div>
-                    ) : (
-                      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                          <thead>
-                            <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-                              <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Shift</th>
-                              <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Start Date</th>
-                              <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>End Date</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {shiftHistory.map((h, idx) => (
-                              <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                <td style={{ padding: '8px 12px', color: '#111827', fontWeight: 600 }}>
-                                  {h.shiftCode || h.shift?.code || '-'}
-                                </td>
-                                <td style={{ padding: '8px 12px', color: '#374151' }}>
-                                  {h.effectiveDate || '-'}
-                                </td>
-                                <td style={{ padding: '8px 12px', color: '#374151' }}>
-                                  {h.endDate || <span style={{ color: '#10b981', fontWeight: 600 }}>Current</span>}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Footer buttons */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 8,
-                marginTop: 10,
-              }}
-            >
-              <button
-                onClick={closeModal}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 999,
-                  border: '1px solid #d1d5db',
-                  backgroundColor: 'transparent',
-                  color: '#374151',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleModalSave}
-                style={{
-                  padding: '7px 16px',
-                  borderRadius: 999,
-                  border: 'none',
-                  background:
-                    'linear-gradient(135deg,#2563eb,#38bdf8,#22c55e)',
-                  color: '#f9fafb',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 24px rgba(37,99,235,0.4)',
-                }}
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-    </>
+            showToast('success', `Employee ${empCode} deleted successfully`);
+            setDeleteConfirm({ isOpen: false, employee: null });
+            loadEmployees(); // Refresh the list
+          } catch (err) {
+            console.error(err);
+            showToast('error', err.message || 'Failed to delete employee');
+          }
+        }}
+        title="Delete Employee"
+        message={`Are you sure you want to delete employee ${deleteConfirm.employee?.empCode} (${deleteConfirm.employee?.name || 'No name'})? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+    </React.Fragment>
   );
 }

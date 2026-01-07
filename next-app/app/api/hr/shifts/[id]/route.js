@@ -109,7 +109,8 @@ export async function PUT(req, { params }) {
   }
 }
 
-// DELETE /api/hr/shifts/[id] - Delete a shift (soft delete by setting isActive to false)
+// DELETE /api/hr/shifts/[id] - Delete a shift
+// Query param: ?permanent=true for permanent deletion, otherwise soft delete (deactivate)
 export async function DELETE(req, { params }) {
   try {
     await connectDB();
@@ -117,17 +118,34 @@ export async function DELETE(req, { params }) {
     // Handle both Next.js 14 and 15 (params might be a promise in Next.js 15)
     const resolvedParams = params instanceof Promise ? await params : params;
     const { id } = resolvedParams;
-    const shift = await Shift.findByIdAndUpdate(
-      id,
-      { $set: { isActive: false } },
-      { new: true }
-    ).lean();
+    
+    // Check if permanent deletion is requested
+    const { searchParams } = new URL(req.url);
+    const permanent = searchParams.get('permanent') === 'true';
 
-    if (!shift) {
-      return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+    if (permanent) {
+      // Permanent deletion - remove from database
+      const shift = await Shift.findByIdAndDelete(id).lean();
+
+      if (!shift) {
+        return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+      }
+
+      return NextResponse.json({ message: 'Shift permanently deleted successfully' });
+    } else {
+      // Soft delete - set isActive to false
+      const shift = await Shift.findByIdAndUpdate(
+        id,
+        { $set: { isActive: false } },
+        { new: true }
+      ).lean();
+
+      if (!shift) {
+        return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+      }
+
+      return NextResponse.json({ shift, message: 'Shift deactivated successfully' });
     }
-
-    return NextResponse.json({ shift, message: 'Shift deactivated successfully' });
   } catch (err) {
     console.error('DELETE /api/hr/shifts/[id] error:', err);
     return NextResponse.json(

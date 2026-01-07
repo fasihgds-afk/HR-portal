@@ -3,16 +3,22 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { colors, theme } = useTheme();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
   const [role, setRole] = useState('HR'); // 'HR' | 'EMPLOYEE'
   const [empCode, setEmpCode] = useState('');
-  const [secretKey, setSecretKey] = useState('');
+  
+  // Password visibility toggles
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -33,11 +39,6 @@ export default function RegisterPage() {
       return;
     }
 
-    if (role === 'HR' && !secretKey.trim()) {
-      setErrorMsg('Secret key is required for HR role');
-      return;
-    }
-
     setLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -48,7 +49,6 @@ export default function RegisterPage() {
           password,
           role,
           empCode: role === 'EMPLOYEE' ? empCode : undefined,
-          secretKey: role === 'HR' ? secretKey : undefined,
         }),
       });
 
@@ -80,13 +80,12 @@ export default function RegisterPage() {
     <div
       style={{
         minHeight: '100vh',
-        background:
-          'radial-gradient(circle at top, #020617 0, #000 40%, #020617 100%)',
+        background: colors.gradient.overlay,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '24px 16px',
-        color: '#e5e7eb',
+        color: colors.text.primary,
         fontFamily:
           '-apple-system,BlinkMacSystemFont,system-ui,Segoe UI,sans-serif',
       }}
@@ -96,32 +95,40 @@ export default function RegisterPage() {
           width: '100%',
           maxWidth: 520,
           borderRadius: 20,
-          background:
-            'linear-gradient(145deg, rgba(15,23,42,0.96), rgba(15,23,42,0.98))',
-          boxShadow: '0 30px 80px rgba(15,23,42,0.85)',
+          background: colors.background.card,
+          boxShadow: theme === 'dark' 
+            ? '0 30px 80px rgba(15,23,42,0.85)'
+            : '0 30px 80px rgba(0,0,0,0.15)',
           padding: '26px 24px 22px',
-          border: '1px solid rgba(59,130,246,0.5)',
+          border: `1px solid ${colors.border.default}`,
           position: 'relative',
         }}
       >
-        {/* Back to login */}
-        <button
-          onClick={goBackToLogin}
-          style={{
-            position: 'absolute',
-            top: 16,
-            right: 18,
-            padding: '6px 12px',
-            borderRadius: 999,
-            border: '1px solid rgba(148,163,184,0.8)',
-            backgroundColor: 'transparent',
-            color: '#e5e7eb',
-            fontSize: 11,
-            cursor: 'pointer',
-          }}
-        >
-          ← Back to Login
-        </button>
+        {/* Theme Toggle and Back to login */}
+        <div style={{ position: 'absolute', top: 16, right: 18, display: 'flex', gap: 10, alignItems: 'center' }}>
+          <ThemeToggle />
+          <button
+            onClick={goBackToLogin}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 999,
+              border: `1px solid ${colors.border.default}`,
+              backgroundColor: 'transparent',
+              color: colors.text.primary,
+              fontSize: 11,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = colors.background.hover;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            ← Back to Login
+          </button>
+        </div>
 
         <div style={{ marginBottom: 18 }}>
           <div
@@ -129,6 +136,7 @@ export default function RegisterPage() {
               fontSize: 20,
               fontWeight: 800,
               marginBottom: 4,
+              color: colors.text.primary,
             }}
           >
             Register New User
@@ -136,11 +144,10 @@ export default function RegisterPage() {
           <div
             style={{
               fontSize: 12,
-              color: '#cbd5f5',
+              color: colors.text.muted,
             }}
           >
-            Create login credentials for HR or link a user to an existing
-            employee code.
+            Create login credentials for HR users. Fill email and password to grant full portal access.
           </div>
         </div>
 
@@ -150,9 +157,9 @@ export default function RegisterPage() {
               marginBottom: 10,
               padding: '8px 10px',
               borderRadius: 8,
-              backgroundColor: 'rgba(239,68,68,0.12)',
-              border: '1px solid rgba(248,113,113,0.8)',
-              color: '#fecaca',
+              backgroundColor: theme === 'dark' ? 'rgba(239,68,68,0.12)' : `${colors.error}20`,
+              border: `1px solid ${colors.error}40`,
+              color: colors.error,
               fontSize: 12,
             }}
           >
@@ -166,9 +173,9 @@ export default function RegisterPage() {
               marginBottom: 10,
               padding: '8px 10px',
               borderRadius: 8,
-              backgroundColor: 'rgba(22,163,74,0.12)',
-              border: '1px solid rgba(34,197,94,0.9)',
-              color: '#bbf7d0',
+              backgroundColor: theme === 'dark' ? 'rgba(22,163,74,0.12)' : `${colors.success}20`,
+              border: `1px solid ${colors.success}40`,
+              color: colors.success,
               fontSize: 12,
             }}
           >
@@ -181,7 +188,7 @@ export default function RegisterPage() {
           style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#cbd5e1' }}>Email</label>
+            <label style={{ fontSize: 11, color: colors.text.secondary, fontWeight: 600 }}>Email</label>
             <input
               type="email"
               value={email}
@@ -189,20 +196,29 @@ export default function RegisterPage() {
               required
               placeholder="user@globaldigitalsolutions.com"
               style={{
-                padding: '9px 11px',
+                padding: '10px 14px',
                 borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.9)',
-                backgroundColor: '#020617',
-                color: '#e5e7eb',
+                border: `1px solid ${colors.border.input}`,
+                backgroundColor: colors.background.input,
+                color: colors.text.primary,
                 fontSize: 13,
                 outline: 'none',
+                transition: 'border-color 0.2s, box-shadow 0.2s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = colors.primary[500];
+                e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = colors.border.input;
+                e.currentTarget.style.boxShadow = 'none';
               }}
             />
           </div>
 
           {/* Role select */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#cbd5e1' }}>Role</label>
+            <label style={{ fontSize: 11, color: colors.text.secondary, fontWeight: 600 }}>Role</label>
             <select
               value={role}
               onChange={(e) => {
@@ -210,18 +226,26 @@ export default function RegisterPage() {
                 // Clear role-specific fields when switching
                 if (e.target.value === 'HR') {
                   setEmpCode('');
-                } else {
-                  setSecretKey('');
                 }
               }}
               style={{
-                padding: '9px 11px',
+                padding: '10px 14px',
                 borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.9)',
-                backgroundColor: '#020617',
-                color: '#e5e7eb',
+                border: `1px solid ${colors.border.input}`,
+                backgroundColor: colors.background.input,
+                color: colors.text.primary,
                 fontSize: 13,
                 outline: 'none',
+                cursor: 'pointer',
+                transition: 'border-color 0.2s, box-shadow 0.2s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = colors.primary[500];
+                e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = colors.border.input;
+                e.currentTarget.style.boxShadow = 'none';
               }}
             >
               <option value="HR">HR (full access)</option>
@@ -229,34 +253,10 @@ export default function RegisterPage() {
             </select>
           </div>
 
-          {/* Secret key (required only when role === HR) */}
-          {role === 'HR' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, color: '#cbd5e1' }}>
-                Secret Key
-              </label>
-              <input
-                type="password"
-                value={secretKey}
-                onChange={(e) => setSecretKey(e.target.value)}
-                placeholder="Enter your secret key"
-                style={{
-                  padding: '9px 11px',
-                  borderRadius: 8,
-                  border: '1px solid rgba(148,163,184,0.9)',
-                  backgroundColor: '#020617',
-                  color: '#e5e7eb',
-                  fontSize: 13,
-                  outline: 'none',
-                }}
-              />
-            </div>
-          )}
-
           {/* Employee code (required only when role === EMPLOYEE) */}
           {role === 'EMPLOYEE' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, color: '#cbd5e1' }}>
+              <label style={{ fontSize: 11, color: colors.text.secondary, fontWeight: 600 }}>
                 Employee Code (must exist in Employees)
               </label>
               <input
@@ -264,59 +264,139 @@ export default function RegisterPage() {
                 onChange={(e) => setEmpCode(e.target.value)}
                 placeholder="e.g. 00082"
                 style={{
-                  padding: '9px 11px',
+                  padding: '10px 14px',
                   borderRadius: 8,
-                  border: '1px solid rgba(148,163,184,0.9)',
-                  backgroundColor: '#020617',
-                  color: '#e5e7eb',
+                  border: `1px solid ${colors.border.input}`,
+                  backgroundColor: colors.background.input,
+                  color: colors.text.primary,
                   fontSize: 13,
                   outline: 'none',
+                  transition: 'border-color 0.2s, box-shadow 0.2s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = colors.primary[500];
+                  e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = colors.border.input;
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               />
             </div>
           )}
 
-          {/* Passwords */}
+          {/* Password with show/hide toggle */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#cbd5e1' }}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="Minimum 6 characters"
-              style={{
-                padding: '9px 11px',
-                borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.9)',
-                backgroundColor: '#020617',
-                color: '#e5e7eb',
-                fontSize: 13,
-                outline: 'none',
-              }}
-            />
+            <label style={{ fontSize: 11, color: colors.text.secondary, fontWeight: 600 }}>Password</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="Minimum 6 characters"
+                style={{
+                  padding: '10px 14px 10px 14px',
+                  paddingRight: '40px',
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border.input}`,
+                  backgroundColor: colors.background.input,
+                  color: colors.text.primary,
+                  fontSize: 13,
+                  outline: 'none',
+                  width: '100%',
+                  transition: 'border-color 0.2s, box-shadow 0.2s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = colors.primary[500];
+                  e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = colors.border.input;
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: colors.text.muted,
+                  fontSize: 18,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                }}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '🙈' : '👁️'}
+              </button>
+            </div>
           </div>
 
+          {/* Confirm Password with show/hide toggle */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#cbd5e1' }}>
+            <label style={{ fontSize: 11, color: colors.text.secondary, fontWeight: 600 }}>
               Confirm Password
             </label>
-            <input
-              type="password"
-              value={password2}
-              onChange={(e) => setPassword2(e.target.value)}
-              required
-              placeholder="Re-enter password"
-              style={{
-                padding: '9px 11px',
-                borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.9)',
-                backgroundColor: '#020617',
-                color: '#e5e7eb',
-                fontSize: 13,
-                outline: 'none',
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword2 ? 'text' : 'password'}
+                value={password2}
+                onChange={(e) => setPassword2(e.target.value)}
+                required
+                placeholder="Re-enter password"
+                style={{
+                  padding: '10px 14px 10px 14px',
+                  paddingRight: '40px',
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border.input}`,
+                  backgroundColor: colors.background.input,
+                  color: colors.text.primary,
+                  fontSize: 13,
+                  outline: 'none',
+                  width: '100%',
+                  transition: 'border-color 0.2s, box-shadow 0.2s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = colors.primary[500];
+                  e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = colors.border.input;
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword2(!showPassword2)}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: colors.text.muted,
+                  fontSize: 18,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                }}
+                title={showPassword2 ? 'Hide password' : 'Show password'}
+              >
+                {showPassword2 ? '🙈' : '👁️'}
+              </button>
+            </div>
           </div>
 
           <button
@@ -324,17 +404,29 @@ export default function RegisterPage() {
             disabled={loading}
             style={{
               marginTop: 10,
-              padding: '10px 16px',
-              borderRadius: 999,
+              padding: '12px 20px',
+              borderRadius: 12,
               border: 'none',
-              background:
-                'linear-gradient(135deg,#3b82f6,#22c55e,#a3e635,#22c55e)',
-              color: '#020617',
-              fontSize: 13,
-              fontWeight: 700,
+              background: `linear-gradient(135deg, ${colors.primary[500]}, ${colors.success})`,
+              color: '#ffffff',
+              fontSize: 14,
+              fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.75 : 1,
-              boxShadow: '0 14px 32px rgba(37,99,235,0.7)',
+              boxShadow: `0 8px 20px ${colors.primary[500]}40`,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = `0 10px 24px ${colors.primary[500]}50`;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = `0 8px 20px ${colors.primary[500]}40`;
+              }
             }}
           >
             {loading ? 'Creating user…' : 'Register User'}
@@ -345,7 +437,7 @@ export default function RegisterPage() {
           style={{
             marginTop: 18,
             fontSize: 11,
-            color: '#9ca3af',
+            color: colors.text.muted,
             textAlign: 'center',
           }}
         >

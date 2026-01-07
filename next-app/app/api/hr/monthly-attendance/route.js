@@ -31,6 +31,10 @@ import { connectDB } from '../../../../lib/db';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Shift from '../../../../models/Shift';
+import { normalizeStatus, extractShiftCode } from '../../../../lib/calculations';
+import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts } from '../../../../lib/calculations';
+import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
+import { generateCacheKey, getOrSetCache, invalidateCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
 // EmployeeShiftHistory removed - using only employee's current shift assignment
 
 export const dynamic = 'force-dynamic';
@@ -80,7 +84,8 @@ function getCompanyTodayParts() {
 }
 
 // company-local date for a calendar day (YYYY-MM, day)
-function getCompanyLocalDateParts(year, monthIndex, day) {
+// PERFORMANCE: Memoized to avoid recalculating same date parts
+const _getCompanyLocalDatePartsOriginal = function(year, monthIndex, day) {
   // build 00:00 UTC, then shift to company local and read UTC* fields
   const baseUtc = Date.UTC(year, monthIndex, day, 0, 0, 0);
   const local = new Date(baseUtc + COMPANY_OFFSET_MS);
@@ -90,7 +95,11 @@ function getCompanyLocalDateParts(year, monthIndex, day) {
     day: local.getUTCDate(),
     dow: local.getUTCDay(), // 0–6 in company timezone
   };
-}
+};
+
+const getCompanyLocalDateParts = memoize(_getCompanyLocalDatePartsOriginal, (year, monthIndex, day) => {
+  return `${year}-${monthIndex}-${day}`;
+});
 
 // -----------------------------------------------------------------------------
 // SHIFT + LATE/EARLY RULES  (timezone-safe)
@@ -128,7 +137,8 @@ function parseTimeToMinutes(timeStr) {
 //  - late / earlyLeave flags (true/false)
 //  - lateMinutes / earlyMinutes = minutes BEYOND grace period
 // shift can be either a shift object (from DB) or a shift code string (legacy)
-function computeLateEarly(shift, checkIn, checkOut, allShiftsMap = null) {
+// PERFORMANCE: Memoized to avoid recalculating same shift/checkIn/checkOut combinations
+const _computeLateEarlyOriginal = function(shift, checkIn, checkOut, allShiftsMap = null) {
   if (!shift || !checkIn || !checkOut) {
     return { late: false, earlyLeave: false, lateMinutes: 0, earlyMinutes: 0 };
   }
@@ -273,7 +283,15 @@ function computeLateEarly(shift, checkIn, checkOut, allShiftsMap = null) {
   const earlyMinutes = earlyLeave ? earlyMinutesTotal - gracePeriod : 0;
 
   return { late, earlyLeave, lateMinutes, earlyMinutes };
-}
+};
+
+// Memoize computeLateEarly for performance (same shift/checkIn/checkOut = same result)
+const computeLateEarly = memoize(_computeLateEarlyOriginal, (shift, checkIn, checkOut) => {
+  const shiftKey = typeof shift === 'object' ? shift.code || shift._id : shift;
+  const checkInKey = checkIn instanceof Date ? checkIn.getTime() : checkIn;
+  const checkOutKey = checkOut instanceof Date ? checkOut.getTime() : checkOut;
+  return createCacheKey(shiftKey, checkInKey, checkOutKey);
+});
 
 // YYYY-MM-DD from a Date, using UTC fields so server timezone doesn't matter
 function toYMD(date) {
@@ -284,9 +302,10 @@ function toYMD(date) {
   return `${y}-${m}-${d}`;
 }
 
-// Extract shift code from potentially formatted strings
-// Handles cases like "– S2 (21:00–06:00)" -> "S2" or "D1" -> "D1"
-function extractShiftCode(shiftStr) {
+// REMOVED: Duplicate extractShiftCode function - now using imported from lib/calculations
+// This function is kept for reference but should not be used
+// Use: import { extractShiftCode } from '../../../../lib/calculations';
+function _extractShiftCode_DEPRECATED(shiftStr) {
   if (!shiftStr || typeof shiftStr !== 'string') return shiftStr || '';
   
   // Trim whitespace
@@ -312,7 +331,10 @@ function extractShiftCode(shiftStr) {
 // STATUS NORMALISATION
 // -----------------------------------------------------------------------------
 
-function normalizeStatus(rawStatus, { isWeekendOff } = {}) {
+// REMOVED: Duplicate normalizeStatus function - now using imported from lib/calculations
+// This function is kept for reference but should not be used
+// Use: import { normalizeStatus } from '../../../../lib/calculations';
+function _normalizeStatus_DEPRECATED(rawStatus, { isWeekendOff } = {}) {
   let s = (rawStatus || '').trim();
   if (!s) {
     if (isWeekendOff) return 'Holiday';
@@ -386,47 +408,35 @@ export async function GET(req) {
     else if (monthIndex > companyToday.monthIndex) monthRelation = 1;
     else monthRelation = 0;
 
-    await connectDB();
+    // Generate cache key based on month
+    const cacheKey = generateCacheKey('monthly-attendance', searchParams);
+    
+    // Get from cache or fetch from database
+    const result = await getOrSetCache(
+      cacheKey,
+      async () => {
+        await connectDB();
 
-    // Check if Shift collection has any documents (to avoid unnecessary queries)
-    const shiftCount = await Shift.countDocuments({ isActive: true });
-    const useDynamicShifts = shiftCount > 0;
+        // Check if Shift collection has any documents (to avoid unnecessary queries)
+        const shiftCount = await Shift.countDocuments({ isActive: true });
+        const useDynamicShifts = shiftCount > 0;
 
-    const employees = await Employee.find(
-      {},
-      {
-        empCode: 1,
-        name: 1,
-        department: 1,
-        designation: 1,
-        shift: 1,
-        shiftId: 1,
-        monthlySalary: 1,
-        _id: 0,
-      }
-    ).lean();
+        // Use optimized projection - only select needed fields
+        const employees = await Employee.find()
+          .select('empCode name department designation shift shiftId monthlySalary')
+          .lean();
 
     const monthStartDate = `${monthPrefix}-01`;
     const monthEndDate = `${monthPrefix}-${String(daysInMonth).padStart(2, '0')}`;
 
+    // Use optimized query with proper projection
     const shiftDocs = await ShiftAttendance.find(
       {
         date: { $gte: monthStartDate, $lte: monthEndDate },
-      },
-      {
-        date: 1,
-        empCode: 1,
-        checkIn: 1,
-        checkOut: 1,
-        shift: 1,
-        attendanceStatus: 1,
-        reason: 1,
-        excused: 1,
-        lateExcused: 1,
-        earlyExcused: 1,
-        _id: 0,
       }
-    ).lean();
+    )
+      .select('date empCode checkIn checkOut shift attendanceStatus reason excused lateExcused earlyExcused')
+      .lean();
 
     const docsByEmpDate = new Map();
     for (const doc of shiftDocs) {
@@ -434,10 +444,18 @@ export async function GET(req) {
       docsByEmpDate.set(`${doc.empCode}|${doc.date}`, doc);
     }
 
-    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts and shift history at once
+    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts and cache them
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
-      const allShifts = await Shift.find({ isActive: true }).lean();
+      // Cache shifts for 10 minutes (they rarely change)
+      const allShifts = await getOrSetCache(
+        'active-shifts',
+        async () => {
+          return await Shift.find({ isActive: true }).lean();
+        },
+        CACHE_TTL.SHIFTS || 600
+      );
+      
       allShifts.forEach((s) => {
         allShiftsMap.set(s._id.toString(), s);
         allShiftsMap.set(s.code, s); // Also index by code for quick lookup
@@ -445,6 +463,17 @@ export async function GET(req) {
     }
 
     // Shift history removed - using only employee's current shift assignment
+
+    // PERFORMANCE: Pre-calculate weekend flags for all days to avoid repeated calculations
+    const weekendFlags = new Map();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const { dow } = getCompanyLocalDateParts(year, monthIndex, day);
+      weekendFlags.set(day, {
+        dow,
+        isSunday: dow === 0,
+        isSaturday: dow === 6,
+      });
+    }
 
     const employeesOut = [];
 
@@ -498,12 +527,13 @@ export async function GET(req) {
           isFutureDay = true;
         }
 
-        // day-of-week in COMPANY timezone
-        const { dow } = getCompanyLocalDateParts(year, monthIndex, day);
-
+        // PERFORMANCE: Use pre-calculated weekend flags
+        const weekendInfo = weekendFlags.get(day);
+        const dow = weekendInfo.dow;
+        
         let isWeekendOff = false;
-        if (dow === 0) isWeekendOff = true; // Sunday
-        if (dow === 6) {
+        if (weekendInfo.isSunday) isWeekendOff = true; // Sunday
+        if (weekendInfo.isSaturday) {
           // alternate Saturdays off
           saturdayIndex++;
           if (saturdayIndex % 2 === 1) isWeekendOff = true;
@@ -1303,14 +1333,20 @@ export async function GET(req) {
       });
     });
 
-    // Add cache headers for better performance (1 minute cache for monthly data)
-    return NextResponse.json({
-      month: monthPrefix,
-      daysInMonth,
-      employees: employeesOut,
-    }, {
+        // Return data for caching
+        return {
+          month: monthPrefix,
+          daysInMonth,
+          employees: employeesOut,
+        };
+      },
+      CACHE_TTL.MONTHLY_ATTENDANCE
+    );
+
+    // Add cache headers for better performance
+    return NextResponse.json(result, {
       headers: {
-        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
       },
     });
   } catch (err) {
@@ -1522,6 +1558,24 @@ export async function POST(req) {
     // Then insert/update with the new shift
     await ShiftAttendance.deleteMany({ date, empCode });
     await ShiftAttendance.create(update);
+
+    // PERFORMANCE: Invalidate monthly attendance cache after update
+    // Extract month from date (YYYY-MM-DD) to get YYYY-MM
+    const monthStr = date.substring(0, 7); // Extract YYYY-MM from YYYY-MM-DD
+    const searchParams = new URLSearchParams({ month: monthStr });
+    const cacheKeyToInvalidate = generateCacheKey('monthly-attendance', searchParams);
+    
+    // Invalidate the specific cache key
+    invalidateCache(cacheKeyToInvalidate);
+    
+    // Also invalidate all monthly-attendance caches for this month (in case of different query params)
+    invalidateCache('monthly-attendance');
+    
+    // Also invalidate daily attendance cache for this date (might be affected)
+    const dailySearchParams = new URLSearchParams({ date });
+    const dailyCacheKey = generateCacheKey('daily-attendance', dailySearchParams);
+    invalidateCache(dailyCacheKey);
+    invalidateCache('daily-attendance'); // Also invalidate all daily-attendance caches
 
     return NextResponse.json({ success: true });
   } catch (err) {

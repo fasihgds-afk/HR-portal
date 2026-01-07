@@ -2,26 +2,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
+import { useAutoLogout } from '@/hooks/useAutoLogout';
+import AutoLogoutWarning from '@/components/ui/AutoLogoutWarning';
 
-const thStyle = {
-  padding: '10px 12px',
-  textAlign: 'left',
-  borderBottom: '1px solid #E5E7EB',
-  fontWeight: 600,
-  fontSize: 13,
-  color: '#0f172a',
-  backgroundColor: '#e5f1ff',
-};
-
-const tdStyle = {
-  padding: '9px 12px',
-  borderBottom: '1px solid #E5E7EB',
-  fontSize: 13,
-  color: '#0f172a',
-  backgroundColor: '#ffffff',
-};
+// Styles will be generated dynamically based on theme
 
 // Time-only formatter for Check In / Check Out
 function formatDateTime(value) {
@@ -36,6 +26,31 @@ function formatDateTime(value) {
 }
 
 export default function HrDashboardPage() {
+  // ALL HOOKS MUST BE CALLED FIRST, IN THE SAME ORDER
+  const { colors, theme } = useTheme(); // Theme colors
+  const router = useRouter();
+  
+  // Auto logout after 30 minutes of inactivity (with 5 minute warning)
+  const { showWarning, timeRemaining, handleStayLoggedIn, handleLogout: autoLogout } = useAutoLogout({
+    inactivityTime: 30 * 60 * 1000, // 30 minutes
+    warningTime: 5 * 60 * 1000, // 5 minutes warning
+    enabled: true,
+  });
+  
+  // Manual logout handler
+  const handleLogout = async () => {
+    try {
+      await signOut({ 
+        redirect: false,
+        callbackUrl: '/login?role=hr'
+      });
+      router.push('/login?role=hr');
+    } catch (error) {
+      console.error('Logout error:', error);
+      router.push('/login?role=hr');
+    }
+  };
+  
   const [businessDate, setBusinessDate] = useState(() => {
     const today = new Date();
     return today.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -48,6 +63,25 @@ export default function HrDashboardPage() {
   const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
 
   const [toast, setToast] = useState({ type: '', text: '' });
+
+  // Generate theme-aware table styles AFTER all hooks
+  const thStyle = {
+    padding: '10px 12px',
+    textAlign: 'left',
+    borderBottom: `1px solid ${colors.border.table}`,
+    fontWeight: 600,
+    fontSize: 13,
+    color: colors.text.table.header,
+    backgroundColor: colors.background.table.header,
+  };
+
+  const tdStyle = {
+    padding: '9px 12px',
+    borderBottom: `1px solid ${colors.border.table}`,
+    fontSize: 13,
+    color: colors.text.table.cell,
+    backgroundColor: colors.background.table.row,
+  };
 
   function showToast(type, text) {
     setToast({ type, text });
@@ -485,7 +519,7 @@ export default function HrDashboardPage() {
             to { transform: rotate(360deg); }
           }
           .hr-att-table tbody tr.data-row:hover td {
-            background-color: #e0edff;
+            background-color: var(--theme-row-hover, rgba(59, 130, 246, 0.1)) !important;
           }
           
           /* Mobile Responsive Styles */
@@ -594,10 +628,10 @@ export default function HrDashboardPage() {
             marginBottom: 18,
             padding: '16px 22px',
             borderRadius: 14,
-            background:
-              'linear-gradient(120deg, #142657ff, #0c225cff, #58D34D)',
+            background: colors.gradient.primary,
             color: '#f9fafb',
             boxShadow: '0 12px 28px rgba(15,23,42,0.55)',
+            border: `1px solid ${colors.border.hover}`,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -658,12 +692,14 @@ export default function HrDashboardPage() {
               style={{
                 padding: '6px 12px',
                 borderRadius: 999,
-                backgroundColor: 'rgba(15,23,42,0.35)',
-                border: '1px solid rgba(148,163,184,0.6)',
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
                 fontSize: 11,
+                color: '#ffffff',
+                backdropFilter: 'blur(10px)',
               }}
             >
-              <span style={{ opacity: 0.8, marginRight: 6 }}>Date:</span>
+              <span style={{ opacity: 0.9, marginRight: 6 }}>Date:</span>
               <span style={{ fontWeight: 600 }}>{businessDate}</span>
             </div>
 
@@ -672,18 +708,30 @@ export default function HrDashboardPage() {
               disabled={loading}
               style={{
                 padding: '10px 20px',
-                borderRadius: 999,
+                borderRadius: 12,
                 border: 'none',
-                background:
-                  'linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)',
-                color: '#ffffffff',
+                background: 'linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)',
+                color: colors.primary[600],
                 fontWeight: 700,
                 fontSize: 13,
                 cursor: loading ? 'default' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: '0 12px 26px rgba(16,185,129,0.45)',
+                boxShadow: '0 6px 20px rgba(255, 255, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2)',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 8px 24px rgba(255, 255, 255, 0.4)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(255, 255, 255, 0.3)';
+                }
               }}
             >
               {loading && (
@@ -692,25 +740,71 @@ export default function HrDashboardPage() {
                     width: 16,
                     height: 16,
                     borderRadius: '999px',
-                    border: '2px solid rgba(191,219,254,0.7)',
-                    borderTopColor: '#022c22',
+                    border: '2px solid rgba(59, 130, 246, 0.3)',
+                    borderTopColor: colors.primary[500],
                     animation: 'spin 0.7s linear infinite',
                   }}
                 />
               )}
               {loading ? 'Loading & Saving…' : 'Load & Save'}
             </button>
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                padding: "9px 18px",
+                borderRadius: 8,
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                backgroundColor: "rgba(255, 255, 255, 0.2)",
+                color: "#ffffff",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
+                backdropFilter: "blur(10px)",
+                transition: "all 0.2s",
+                whiteSpace: "nowrap",
+                height: "36px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: "80px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.3)";
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(0, 0, 0, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.2)";
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.25)";
+              }}
+            >
+              Logout
+            </button>
           </div>
         </div>
+        
+        {/* Auto Logout Warning */}
+        {showWarning && (
+          <AutoLogoutWarning
+            timeRemaining={timeRemaining}
+            onStayLoggedIn={handleStayLoggedIn}
+            onLogout={autoLogout}
+          />
+        )}
 
         {/* MAIN CARD */}
         <div
           className="daily-main-card"
           style={{
-            borderRadius: 14,
-            backgroundColor: '#f3f6fb',
-            boxShadow: '0 16px 34px rgba(15,23,42,0.45)',
-            padding: '18px 20px 20px',
+            borderRadius: 16,
+            background: colors.gradient.card,
+            border: `1px solid ${colors.border.default}`,
+            boxShadow: colors.card.shadow,
+            padding: '24px 28px 28px',
           }}
         >
           {/* Legend + date + summary + stats */}
@@ -722,16 +816,16 @@ export default function HrDashboardPage() {
                 marginBottom: 14,
                 padding: '10px 12px',
                 borderRadius: 10,
-                backgroundColor: '#0a2045ff',
-                border: '2px solid  #58D34D',
+                backgroundColor: colors.background.legend,
+                border: `2px solid ${colors.primary[500]}`,
                 fontSize: 13,
-                color: '#ffffffff',
+                color: colors.text.primary,
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
               }}
             >
-              <strong style={{ color: '#ffffffff' }}>Shift Legend:</strong>
+              <strong style={{ color: colors.text.primary }}>Shift Legend:</strong>
               <span>
                 {shifts.length > 0 ? (
                   shifts.map((shift, idx) => (
@@ -764,7 +858,7 @@ export default function HrDashboardPage() {
                       fontWeight: 600,
                       display: 'block',
                       marginBottom: 4,
-                      color: '#111827',
+                      color: colors.text.primary,
                     }}
                   >
                     Business Date
@@ -776,12 +870,13 @@ export default function HrDashboardPage() {
                     style={{
                       padding: '7px 10px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5f5',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a',
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                       minWidth: 170,
                       fontSize: 13,
                       outline: 'none',
+                      cursor: 'pointer',
                     }}
                   />
                 </div>
@@ -804,12 +899,13 @@ export default function HrDashboardPage() {
                     style={{
                       padding: '7px 10px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5f5',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a',
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                       minWidth: 200,
                       fontSize: 13,
                       outline: 'none',
+                      cursor: 'pointer',
                     }}
                   >
                     <option value="">All Shifts</option>
@@ -832,7 +928,7 @@ export default function HrDashboardPage() {
                     flexDirection: 'column',
                     gap: 4,
                     fontSize: 12,
-                    color: '#4b5563',
+                    color: colors.text.secondary,
                   }}
                 >
                   <span>
@@ -848,7 +944,7 @@ export default function HrDashboardPage() {
                     )}
                   </span>
                   {status && (
-                    <span style={{ color: '#065f46' }}>{status}</span>
+                    <span style={{ color: colors.success }}>{status}</span>
                   )}
                 </div>
               </div>
@@ -866,40 +962,40 @@ export default function HrDashboardPage() {
                   style={{
                     padding: '6px 10px',
                     borderRadius: 999,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #cbd5f5',
+                    backgroundColor: colors.background.card,
+                    border: `1px solid ${colors.border.default}`,
                   }}
                 >
-                  <span style={{ color: '#6b7280', marginRight: 4 }}>
+                  <span style={{ color: colors.text.secondary, marginRight: 4 }}>
                     Records:
                   </span>
-                  <strong>{totalRecords}</strong>
+                  <strong style={{ color: colors.text.primary }}>{totalRecords}</strong>
                 </div>
                 <div
                   style={{
                     padding: '6px 10px',
                     borderRadius: 999,
-                    backgroundColor: '#dcfce7',
-                    border: '1px solid #16a34a',
+                    backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.15)' : '#dcfce7',
+                    border: `1px solid ${colors.success}`,
                   }}
                 >
-                  <span style={{ color: '#166534', marginRight: 4 }}>
+                  <span style={{ color: colors.success, marginRight: 4 }}>
                     Present:
                   </span>
-                  <strong>{presentCount}</strong>
+                  <strong style={{ color: colors.success }}>{presentCount}</strong>
                 </div>
                 <div
                   style={{
                     padding: '6px 10px',
                     borderRadius: 999,
-                    backgroundColor: '#fee2e2',
-                    border: '1px solid #b91c1c',
+                    backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2',
+                    border: `1px solid ${colors.error}`,
                   }}
                 >
-                  <span style={{ color: '#991b1b', marginRight: 4 }}>
+                  <span style={{ color: colors.error, marginRight: 4 }}>
                     Absent:
                   </span>
-                  <strong>{absentCount}</strong>
+                  <strong style={{ color: colors.error }}>{absentCount}</strong>
                 </div>
                 <div
                   style={{
@@ -987,7 +1083,7 @@ export default function HrDashboardPage() {
                       top: '50%',
                       transform: 'translateY(-50%)',
                       fontSize: 13,
-                      color: '#9ca3af',
+                      color: colors.text.tertiary,
                     }}
                   >
                     🔍
@@ -999,11 +1095,19 @@ export default function HrDashboardPage() {
                     style={{
                       padding: '8px 12px 8px 30px',
                       borderRadius: 999,
-                      border: '1px solid #cbd5f5',
-                      backgroundColor: '#ffffff',
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                       fontSize: 12,
                       outline: 'none',
                       minWidth: 220,
+                      transition: 'border-color 0.2s',
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = colors.primary[500];
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = colors.border.input;
                     }}
                   />
                 </div>
@@ -1031,15 +1135,16 @@ export default function HrDashboardPage() {
             </div>
 
             <div className="daily-table-wrapper" style={{ overflowX: 'auto' }}>
-              <table
+                <table
                 className="hr-att-table daily-table"
                 style={{
                   width: '100%',
                   minWidth: 900,
                   borderCollapse: 'collapse',
                   borderRadius: 10,
-                  border: '1px solid #0F162A',
+                  border: `1px solid ${colors.border.table}`,
                   overflow: 'hidden',
+                  backgroundColor: colors.background.table.row,
                 }}
               >
                 <thead>
@@ -1063,7 +1168,7 @@ export default function HrDashboardPage() {
                         style={{
                           ...tdStyle,
                           textAlign: 'center',
-                          color: '#6b7280',
+                          color: colors.text.tertiary,
                           backgroundColor: '#f9fafb',
                           padding: '14px 12px',
                         }}
@@ -1082,9 +1187,12 @@ export default function HrDashboardPage() {
                               colSpan={9}
                               style={{
                                 ...tdStyle,
-                                backgroundColor: '#0F162A',
-                                color: '#ffffffff',
-                                border: '2px solid #58D34D',
+                                backgroundColor: theme === 'dark' ? colors.background.secondary : colors.background.table.header,
+                                color: colors.text.primary,
+                                borderTop: '2px solid #58D34D',
+                                borderRight: '2px solid #58D34D',
+                                borderBottom: '2px solid #58D34D',
+                                borderLeft: '2px solid #58D34D',
                                 fontWeight: 700,
                                 textAlign: 'center',
                               }}
@@ -1127,7 +1235,18 @@ export default function HrDashboardPage() {
                           className="data-row"
                           style={{
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = colors.background.table.rowHover;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven;
                           }}
                         >
                           <td style={tdStyle}>{row.empCode}</td>
@@ -1199,6 +1318,15 @@ export default function HrDashboardPage() {
         >
           {toast.text}
         </div>
+      )}
+      
+      {/* Auto Logout Warning */}
+      {showWarning && (
+        <AutoLogoutWarning
+          timeRemaining={timeRemaining}
+          onStayLoggedIn={handleStayLoggedIn}
+          onLogout={autoLogout}
+        />
       )}
     </div>
   );

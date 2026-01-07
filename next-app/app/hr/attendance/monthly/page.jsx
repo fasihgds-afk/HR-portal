@@ -2,29 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import ExcelJS from 'exceljs';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
-const headerCell = {
-  padding: '8px 10px',
-  borderBottom: '1px solid #E5E7EB',
-  fontSize: 11.5,
-  fontWeight: 600,
-  color: '#ffffff',
-  backgroundColor: '#0c225c', // Logo blue
-  background: 'linear-gradient(135deg, #0c225c, #58D34D)', // Green-blue gradient
-  textAlign: 'center',
-  whiteSpace: 'nowrap',
-  position: 'sticky',
-  top: 0,
-  zIndex: 5,
-};
-
-const baseCell = {
-  padding: '6px 8px',
-  borderBottom: '1px solid #E5E7EB',
-  fontSize: 11.5,
-  color: '#0f172a',
-  textAlign: 'center',
-};
+// Styles will be generated dynamically based on theme
 
 function formatTimeShort(value) {
   if (!value) return '';
@@ -93,7 +74,7 @@ function formatCurrency(value) {
 }
 
 // --- Cell color rules (includes EXCUSED + missing punches + WFH) ------
-function getCellStyle(day) {
+function getCellStyle(day, colors, baseCell, theme) {
   const isLeaveType =
     day.status === 'Paid Leave' ||
     day.status === 'Un Paid Leave' ||
@@ -103,8 +84,8 @@ function getCellStyle(day) {
   if (day.status === 'Work From Home') {
     return {
       ...baseCell,
-      backgroundColor: '#dbeafe', // Light blue (logo blue tint)
-      color: '#0c225c', // Logo blue text
+      backgroundColor: theme === 'dark' ? 'rgba(59, 130, 246, 0.2)' : '#dbeafe',
+      color: theme === 'dark' ? colors.primary[300] : colors.primary[800],
       fontWeight: 600,
     };
   }
@@ -115,8 +96,8 @@ function getCellStyle(day) {
     if (day.status === 'Holiday') {
       return {
         ...baseCell,
-        backgroundColor: '#f3f4f6',
-        color: '#6b7280',
+        backgroundColor: colors.background.tertiary,
+        color: colors.text.tertiary,
       };
     }
 
@@ -126,16 +107,16 @@ function getCellStyle(day) {
       if (day.status === 'Un Paid Leave') {
         return {
           ...baseCell,
-          backgroundColor: '#f3e8ff', // Light purple/lavender
-          color: '#6b21a8', // Deep purple text
+          backgroundColor: theme === 'dark' ? 'rgba(168, 85, 247, 0.2)' : '#f3e8ff',
+          color: theme === 'dark' ? colors.accent.purple : '#6b21a8',
           fontWeight: 600,
         };
       }
       // Paid Leave and Sick Leave use yellow/amber
       return {
         ...baseCell,
-        backgroundColor: '#fef9c3',
-        color: '#92400e',
+        backgroundColor: theme === 'dark' ? 'rgba(251, 191, 36, 0.2)' : '#fef9c3',
+        color: theme === 'dark' ? colors.warning : '#92400e',
       };
     }
 
@@ -143,8 +124,8 @@ function getCellStyle(day) {
     if (day.status === 'Absent') {
       return {
         ...baseCell,
-        backgroundColor: '#fee2e2',
-        color: '#991b1b',
+        backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+        color: theme === 'dark' ? colors.error : '#991b1b',
         fontWeight: 600,
       };
     }
@@ -153,8 +134,8 @@ function getCellStyle(day) {
     if (day.status === 'Leave Without Inform') {
       return {
         ...baseCell,
-        backgroundColor: '#fee2e2',
-        color: '#991b1b',
+        backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+        color: theme === 'dark' ? colors.error : '#991b1b',
         fontWeight: 600,
       };
     }
@@ -162,8 +143,8 @@ function getCellStyle(day) {
     // Fallback grey
     return {
       ...baseCell,
-      backgroundColor: '#f3f4f6',
-      color: '#6b7280',
+      backgroundColor: colors.background.tertiary,
+      color: colors.text.tertiary,
     };
   }
 
@@ -176,17 +157,17 @@ function getCellStyle(day) {
       // EXCUSED missing punch: green
       return {
         ...baseCell,
-        backgroundColor: '#dcfce7',
-        color: '#166534',
+        backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7',
+        color: theme === 'dark' ? colors.success : '#166534',
         fontWeight: 600,
-        boxShadow: '0 0 0 1px #16a34a inset',
+        boxShadow: `0 0 0 1px ${colors.success} inset`,
       };
     }
     // Not excused: red for missing punch
     return {
       ...baseCell,
-      backgroundColor: '#fee2e2',
-      color: '#991b1b',
+      backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+      color: theme === 'dark' ? colors.error : '#991b1b',
       fontWeight: 600,
     };
   }
@@ -204,10 +185,10 @@ function getCellStyle(day) {
   if ((day.late || day.earlyLeave) && !hasAnyViolation) {
     return {
       ...baseCell,
-      backgroundColor: '#dcfce7',
-      color: '#166534',
+      backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7',
+      color: theme === 'dark' ? colors.success : '#166534',
       fontWeight: 600,
-      boxShadow: '0 0 0 1px #16a34a inset',
+      boxShadow: `0 0 0 1px ${colors.success} inset`,
     };
   }
 
@@ -218,8 +199,8 @@ function getCellStyle(day) {
     // Both late and early violations (not excused) = red
     return {
       ...baseCell,
-      backgroundColor: '#fee2e2',
-      color: '#991b1b',
+      backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+      color: theme === 'dark' ? colors.error : '#991b1b',
       fontWeight: 600,
     };
   } else if (hasLateViolation) {
@@ -227,8 +208,8 @@ function getCellStyle(day) {
     // This includes: late not excused, early either not present or excused
     return {
       ...baseCell,
-      backgroundColor: '#fef3c7', // Professional amber
-      color: '#b45309', // Deeper amber text for better contrast
+      backgroundColor: theme === 'dark' ? 'rgba(251, 191, 36, 0.2)' : '#fef3c7',
+      color: theme === 'dark' ? colors.warning : '#b45309',
       fontWeight: 600,
     };
   } else if (hasEarlyViolation) {
@@ -236,8 +217,8 @@ function getCellStyle(day) {
     // This includes: early not excused, late either not present or excused
     return {
       ...baseCell,
-      backgroundColor: '#fed7aa', // Professional orange (softer than red)
-      color: '#c2410c', // Deep orange text
+      backgroundColor: theme === 'dark' ? 'rgba(249, 115, 22, 0.2)' : '#fed7aa',
+      color: theme === 'dark' ? colors.accent.orange : '#c2410c',
       fontWeight: 600,
     };
   }
@@ -245,8 +226,8 @@ function getCellStyle(day) {
   // Normal on-time green (no violations)
   return {
     ...baseCell,
-    backgroundColor: '#dcfce7',
-    color: '#14532d',
+    backgroundColor: theme === 'dark' ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7',
+    color: theme === 'dark' ? colors.success : '#14532d',
     fontWeight: 600,
   };
 }
@@ -288,6 +269,8 @@ function isUpcomingDayClient(dateStr, apiMonth) {
 }
 
 export default function MonthlyHrPage() {
+  // ALL HOOKS MUST BE CALLED FIRST, IN THE SAME ORDER
+  const { colors, theme } = useTheme(); // Theme colors
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return now.toISOString().slice(0, 7); // YYYY-MM
@@ -340,6 +323,33 @@ export default function MonthlyHrPage() {
   const [exportIncludeDays, setExportIncludeDays] = useState(true);
   const [showExportSettings, setShowExportSettings] = useState(false);
 
+  // Generate theme-aware table styles AFTER all hooks
+  const headerCell = {
+    padding: '8px 10px',
+    borderBottom: `1px solid ${colors.border.table}`,
+    fontSize: 11.5,
+    fontWeight: 600,
+    color: theme === 'dark' ? '#ffffff' : colors.text.table.header,
+    backgroundColor: theme === 'dark' ? colors.primary[800] : colors.primary[500],
+    background: theme === 'dark' 
+      ? `linear-gradient(135deg, ${colors.primary[800]}, ${colors.primary[600]})`
+      : `linear-gradient(135deg, ${colors.primary[500]}, ${colors.primary[600]})`,
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+    position: 'sticky',
+    top: 0,
+    zIndex: 5,
+  };
+
+  const baseCell = {
+    padding: '6px 8px',
+    borderBottom: `1px solid ${colors.border.table}`,
+    fontSize: 11.5,
+    color: colors.text.table.cell,
+    textAlign: 'center',
+    backgroundColor: colors.background.table.row,
+  };
+
   function toggleExportColumn(key) {
     setExportColumns((cols) =>
       cols.map((c) => (c.key === key ? { ...c, enabled: !c.enabled } : c))
@@ -369,12 +379,17 @@ export default function MonthlyHrPage() {
     loadShifts();
   }, []);
 
-  async function loadMonth() {
+  async function loadMonth(forceRefresh = false) {
     try {
       setLoading(true);
-      const res = await fetch(`/api/hr/monthly-attendance?month=${month}`, {
+      // Add cache-busting parameter if force refresh is needed
+      const url = forceRefresh 
+        ? `/api/hr/monthly-attendance?month=${month}&_t=${Date.now()}`
+        : `/api/hr/monthly-attendance?month=${month}`;
+      
+      const res = await fetch(url, {
         method: 'GET',
-        cache: 'default', // Allow browser cache for better performance
+        cache: forceRefresh ? 'no-store' : 'default', // Bypass browser cache if force refresh
       });
 
       if (!res.ok) {
@@ -468,7 +483,8 @@ export default function MonthlyHrPage() {
 
       showToast('success', 'Day updated successfully');
       closeModal();
-      await loadMonth();
+      // Force refresh to get updated data (bypasses cache)
+      await loadMonth(true);
     } catch (err) {
       console.error('Save error:', err);
       showToast('error', err.message || 'Failed to save day');
@@ -899,8 +915,8 @@ export default function MonthlyHrPage() {
       style={{
         minHeight: '100vh',
         padding: '24px 28px 32px',
-        background: 'linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)',
-        color: '#0f172a',
+        background: colors.gradient.overlay,
+        color: colors.text.primary,
         fontFamily:
           'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       }}
@@ -1033,10 +1049,10 @@ export default function MonthlyHrPage() {
             marginBottom: 20,
             padding: '16px 22px',
             borderRadius: 18,
-            background:
-              'linear-gradient(135deg, #19264aff, #0c225cff, #58D34D)',
+            background: colors.gradient.primary,
             color: '#f9fafb',
             boxShadow: '0 16px 38px rgba(255, 255, 255, 0.09)',
+            border: `1px solid ${colors.border.hover}`,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -1094,16 +1110,17 @@ export default function MonthlyHrPage() {
               alignItems: 'center',
             }}
           >
-            <div style={{ position: 'relative', display: 'flex', gap: 6 }}>
+            <div style={{ position: 'relative', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <ThemeToggle />
               <button
                 onClick={handleExport}
                 disabled={loading || !filteredEmployees.length}
                 style={{
                   padding: '8px 16px',
-                  borderRadius: 999,
-                  border: '1px solid rgba(88,211,77,0.4)', // Logo green border
-                  background: 'linear-gradient(135deg, #0c225c, #58D34D)', // Logo green-blue gradient
-                  color: '#ffffff',
+                  borderRadius: 12,
+                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)',
+                  color: colors.primary[600],
                   fontWeight: 600,
                   fontSize: 12.5,
                   cursor:
@@ -1115,16 +1132,17 @@ export default function MonthlyHrPage() {
                   gap: 6,
                   opacity: loading || !filteredEmployees.length ? 0.5 : 1,
                   transition: 'all 0.2s',
+                  boxShadow: '0 4px 12px rgba(255, 255, 255, 0.2)',
                 }}
                 onMouseEnter={(e) => {
                   if (!loading && filteredEmployees.length) {
-                    e.currentTarget.style.transform = 'scale(1.05)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(88,211,77,0.3)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(255, 255, 255, 0.3)';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'scale(1)';
-                  e.currentTarget.style.boxShadow = 'none';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 255, 255, 0.2)';
                 }}
               >
                 ⬇ Export to Excel
@@ -1276,10 +1294,10 @@ export default function MonthlyHrPage() {
         <div
           style={{
             borderRadius: 16,
-            backgroundColor: '#e8f5e9', // Light green tint (logo green)
-            background: 'linear-gradient(135deg, #e8f5e9, #e3f2fd)', // Green-blue gradient
-            boxShadow: '0 18px 40px rgba(12,34,92,0.25)', // Logo blue shadow
-            padding: '18px 20px 20px',
+            background: colors.gradient.card,
+            border: `1px solid ${colors.border.default}`,
+            boxShadow: colors.card.shadow,
+            padding: '24px 28px 28px',
           }}
         >
           {/* Controls + summary */}
@@ -1301,7 +1319,7 @@ export default function MonthlyHrPage() {
                       fontWeight: 600,
                       display: 'block',
                       marginBottom: 4,
-                      color: '#111827',
+                      color: colors.text.primary,
                     }}
                   >
                     Year
@@ -1316,9 +1334,9 @@ export default function MonthlyHrPage() {
                     style={{
                       padding: '7px 10px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5f5',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a',
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                       minWidth: 100,
                       fontSize: 13,
                       outline: 'none',
@@ -1342,7 +1360,7 @@ export default function MonthlyHrPage() {
                       fontWeight: 600,
                       display: 'block',
                       marginBottom: 4,
-                      color: '#111827',
+                      color: colors.text.primary,
                     }}
                   >
                     Month
@@ -1357,9 +1375,9 @@ export default function MonthlyHrPage() {
                     style={{
                       padding: '7px 10px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5f5',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a',
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.background.input,
+                      color: colors.text.primary,
                       minWidth: 140,
                       fontSize: 13,
                       outline: 'none',
@@ -1384,13 +1402,13 @@ export default function MonthlyHrPage() {
 
               {/* Search bar */}
               <div className="monthly-search-input" style={{ minWidth: 280 }}>
-                <label
+                  <label
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
                     display: 'block',
                     marginBottom: 4,
-                    color: '#111827',
+                    color: colors.text.primary,
                   }}
                 >
                   Search Employee
@@ -1407,7 +1425,7 @@ export default function MonthlyHrPage() {
                       position: 'absolute',
                       left: 10,
                       fontSize: 13,
-                      color: '#9ca3af',
+                      color: colors.text.tertiary,
                     }}
                   >
                     🔍
@@ -1439,7 +1457,7 @@ export default function MonthlyHrPage() {
                     fontWeight: 600,
                     display: 'block',
                     marginBottom: 4,
-                    color: '#111827',
+                    color: colors.text.primary,
                   }}
                 >
                   Filter by Shift
@@ -1450,12 +1468,13 @@ export default function MonthlyHrPage() {
                   style={{
                     padding: '7px 10px',
                     borderRadius: 8,
-                    border: '1px solid #cbd5f5',
-                    backgroundColor: '#ffffff',
-                    color: '#0f172a',
+                    border: `1px solid ${colors.border.input}`,
+                    backgroundColor: colors.background.input,
+                    color: colors.text.primary,
                     fontSize: 13,
                     outline: 'none',
                     width: '100%',
+                    cursor: 'pointer',
                   }}
                 >
                   <option value="">All Shifts</option>
@@ -1479,7 +1498,7 @@ export default function MonthlyHrPage() {
                   flexDirection: 'column',
                   gap: 4,
                   fontSize: 12,
-                  color: '#4b5563',
+                  color: colors.text.secondary,
                 }}
               >
                 <span>
@@ -1514,8 +1533,7 @@ export default function MonthlyHrPage() {
           <div
             style={{
               height: 1,
-              background:
-                'linear-gradient(90deg, transparent, #cbd5f5, transparent)',
+              background: `linear-gradient(90deg, transparent, ${colors.border.default}, transparent)`,
               margin: '4px 0 10px',
             }}
           />
@@ -1528,7 +1546,8 @@ export default function MonthlyHrPage() {
               overflowX: 'auto',
               overflowY: 'auto',
               borderRadius: 12,
-              backgroundColor: '#edf3ff',
+              backgroundColor: colors.background.table.row,
+              border: `1px solid ${colors.border.table}`,
             }}
             onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
           >
@@ -1552,7 +1571,7 @@ export default function MonthlyHrPage() {
                       maxWidth: 110,
                       left: 0,
                       boxShadow:
-                        scrollLeft > 0 ? '2px 0 0 rgba(148,163,184,0.8)' : 'none',
+                        scrollLeft > 0 ? `2px 0 0 ${colors.border.default}` : 'none',
                     }}
                   >
                     Emp Code
@@ -1567,7 +1586,7 @@ export default function MonthlyHrPage() {
                       maxWidth: 220,
                       left: 110,
                       boxShadow:
-                        scrollLeft > 0 ? '2px 0 0 rgba(148,163,184,0.8)' : 'none',
+                        scrollLeft > 0 ? `2px 0 0 ${colors.border.default}` : 'none',
                     }}
                   >
                     Name
@@ -1682,7 +1701,9 @@ export default function MonthlyHrPage() {
                             left: 0,
                             zIndex: 3,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             boxShadow:
                               scrollLeft > 0
                                 ? '2px 0 0 rgba(148,163,184,0.8)'
@@ -1705,7 +1726,9 @@ export default function MonthlyHrPage() {
                             left: 110,
                             zIndex: 3,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             boxShadow:
                               scrollLeft > 0
                                 ? '2px 0 0 rgba(148,163,184,0.8)'
@@ -1721,7 +1744,9 @@ export default function MonthlyHrPage() {
                             ...baseCell,
                             textAlign: 'left',
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             minWidth: 150,
                           }}
                         >
@@ -1732,7 +1757,9 @@ export default function MonthlyHrPage() {
                             ...baseCell,
                             textAlign: 'left',
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             minWidth: 170,
                           }}
                         >
@@ -1742,7 +1769,9 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             minWidth: 70,
                           }}
                         >
@@ -1754,7 +1783,9 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             minWidth: 120,
                             textAlign: 'right',
                             fontWeight: 500,
@@ -1769,14 +1800,16 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             minWidth: 120,
                             textAlign: 'right',
                             fontWeight: 600,
                             color:
                               (emp.salaryDeductDays || 0) > 0
-                                ? '#166534'
-                                : '#0f172a',
+                                ? colors.success
+                                : colors.text.primary,
                           }}
                           title={`Net salary after deductions`}
                         >
@@ -1788,13 +1821,15 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             fontWeight:
                               (emp.salaryDeductDays || 0) > 0 ? 700 : 400,
                             color:
                               (emp.salaryDeductDays || 0) > 0
-                                ? '#b91c1c'
-                                : '#0f172a',
+                                ? colors.error
+                                : colors.text.primary,
                             minWidth: 120,
                           }}
                           title={`Total salary deduction days for this month: ${formatSalaryDays(
@@ -1809,7 +1844,9 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             fontSize: 11,
                             minWidth: 70,
                           }}
@@ -1837,7 +1874,9 @@ export default function MonthlyHrPage() {
                           style={{
                             ...baseCell,
                             backgroundColor:
-                              idx % 2 === 0 ? '#ffffff' : '#f3f4ff',
+                              idx % 2 === 0 
+                                ? colors.background.table.row 
+                                : colors.background.table.rowEven,
                             fontSize: 11,
                             minWidth: 70,
                           }}
@@ -1945,7 +1984,7 @@ export default function MonthlyHrPage() {
                           return (
                             <td
                               key={`${emp.empCode}-${day.date}-${i}`}
-                              style={getCellStyle(day)}
+                              style={getCellStyle(day, colors, baseCell, theme)}
                               onClick={() => openCellModal(emp, day)}
                               title={titleParts.join(' | ')}
                             >

@@ -48,5 +48,19 @@ const EmployeeSchema = new mongoose.Schema(
 // 🔁 Optional: only if you want faster department+shift group reports
 EmployeeSchema.index({ department: 1, shift: 1 });
 
+// ✅ PERFORMANCE: Indexes for common query patterns
+// Index for department filtering
+EmployeeSchema.index({ department: 1 });
+
+// Index for shift filtering
+EmployeeSchema.index({ shift: 1 });
+
+// Text index for search (name, email, empCode)
+// This supports $text search queries (faster than regex)
+EmployeeSchema.index({ name: 'text', email: 'text', empCode: 'text' });
+
+// Compound index for common filter combinations
+EmployeeSchema.index({ department: 1, shift: 1, empCode: 1 });
+
 export default mongoose.models.Employee ||
   mongoose.model('Employee', EmployeeSchema);
