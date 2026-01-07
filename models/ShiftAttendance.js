@@ -43,8 +43,14 @@ ShiftAttendanceSchema.index({ date: 1, empCode: 1, shift: 1 }, { unique: false }
 // For monthly attendance queries (date range + empCode)
 ShiftAttendanceSchema.index({ date: 1, empCode: 1 });
 
-// Index for empCode queries (for employee-specific lookups)
-ShiftAttendanceSchema.index({ empCode: 1, date: 1 });
+// Index for empCode queries (for employee-specific lookups) - descending date for recent first
+ShiftAttendanceSchema.index({ empCode: 1, date: -1 });
+
+// Index for status filtering (common in reports)
+ShiftAttendanceSchema.index({ date: 1, attendanceStatus: 1 });
+
+// Index for late/early leave queries
+ShiftAttendanceSchema.index({ date: 1, late: 1, earlyLeave: 1 });
 
 
 

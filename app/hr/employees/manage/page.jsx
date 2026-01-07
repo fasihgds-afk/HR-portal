@@ -87,7 +87,9 @@ export default function EmployeeShiftPage() {
 
   async function loadShifts() {
     try {
-      const res = await fetch('/api/hr/shifts?activeOnly=true');
+      const res = await fetch('/api/hr/shifts?activeOnly=true', {
+        cache: 'no-store', // Always get fresh shifts
+      });
       if (res.ok) {
         const data = await res.json();
         setShifts(data.shifts || []);
@@ -97,7 +99,7 @@ export default function EmployeeShiftPage() {
     }
   }
 
-  async function loadEmployees() {
+  async function loadEmployees(forceRefresh = false) {
     setLoading(true);
 
     try {
@@ -111,8 +113,20 @@ export default function EmployeeShiftPage() {
       if (selectedShift) {
         params.set('shift', selectedShift);
       }
+      
+      // Add cache-busting parameter to bypass server-side cache
+      if (forceRefresh) {
+        params.set('_t', Date.now().toString()); // Server will bypass cache when this is present
+      }
 
-      const res = await fetch(`/api/employee?${params.toString()}`);
+      const res = await fetch(`/api/employee?${params.toString()}`, {
+        cache: 'no-store', // Always bypass browser cache
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
+      
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Failed to load employees (${res.status})`);
@@ -178,6 +192,7 @@ export default function EmployeeShiftPage() {
 
       const data = await res.json();
 
+      // Update local state immediately for instant feedback
       setEmployees((prev) =>
         prev.map((e) =>
           e.empCode === data.employee.empCode ? data.employee : e
@@ -188,6 +203,12 @@ export default function EmployeeShiftPage() {
         'success',
         `Saved ${data.employee.empCode} (${data.employee.name || 'No name'})`
       );
+      
+      // Refresh the list to ensure we have the latest data from server
+      // Use forceRefresh to bypass cache
+      setTimeout(() => {
+        loadEmployees(true);
+      }, 500);
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to save employee');
@@ -253,7 +274,9 @@ export default function EmployeeShiftPage() {
 
       setIsModalOpen(false);
       setEditingEmployee(null);
-      loadEmployees(); // Refresh to get updated data
+      
+      // Force refresh to get latest data from server (bypass cache)
+      loadEmployees(true);
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to save employee');
@@ -528,7 +551,7 @@ export default function EmployeeShiftPage() {
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <button
-              onClick={loadEmployees}
+              onClick={() => loadEmployees(true)}
               disabled={loading}
               style={{
                 padding: '8px 16px',
@@ -728,7 +751,9 @@ export default function EmployeeShiftPage() {
 
             showToast('success', `Employee ${empCode} deleted successfully`);
             setDeleteConfirm({ isOpen: false, employee: null });
-            loadEmployees(); // Refresh the list
+            
+            // Force refresh to get latest data from server (bypass cache)
+            loadEmployees(true);
           } catch (err) {
             console.error(err);
             showToast('error', err.message || 'Failed to delete employee');

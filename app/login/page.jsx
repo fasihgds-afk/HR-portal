@@ -3,14 +3,13 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn, useSession } from "next-auth/react";
+import { signIn } from "next-auth/react";
+import { useTheme } from "@/lib/theme/ThemeContext";
 
 function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  const { data: session } = useSession();
-  const isAdmin = session?.user?.role === "ADMIN";
+  const { theme, toggleTheme, colors } = useTheme();
 
   // 🔒 Lock employee login on UI
   const employeeLoginLocked = false; // change to false if you want to re-enable employee login
@@ -34,10 +33,6 @@ function LoginInner() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    console.log("[LoginPage] rendered, current mode =", mode);
-  }, [mode]);
-
   // If employee login is locked and mode is EMPLOYEE, force back to HR
   useEffect(() => {
     if (employeeLoginLocked && mode === "EMPLOYEE") {
@@ -60,8 +55,6 @@ function LoginInner() {
         callbackUrl: "/hr/employees",
       });
 
-      console.log("[HR login result]", result);
-
       if (!result || result.error) {
         setErrorMsg("Invalid HR email or password.");
         setLoading(false);
@@ -69,7 +62,6 @@ function LoginInner() {
       }
 
       // Use window.location for a full page reload to ensure session cookie is sent
-      // This is more reliable than router.push for initial login
       window.location.href = result.url || "/hr/employees";
     } catch (err) {
       console.error("HR login error", err);
@@ -99,8 +91,6 @@ function LoginInner() {
         callbackUrl: "/employee/dashboard",
       });
 
-      console.log("[Employee login result]", result);
-
       if (!result || result.error) {
         setErrorMsg("Invalid employee code.");
         setLoading(false);
@@ -116,6 +106,11 @@ function LoginInner() {
   }
 
   // ---------------- RENDER ----------------
+  const isDark = theme === "dark";
+  const gradient = isDark
+    ? "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)"
+    : "linear-gradient(135deg, #3b82f6, #2563eb, #22c55e)";
+
   return (
     <div
       className="login-page-wrapper"
@@ -126,13 +121,15 @@ function LoginInner() {
         alignItems: "center",
         justifyContent: "center",
         padding: 20,
-        backgroundImage: "url('/new1.jpeg')",
+        backgroundImage: isDark ? "url('/new1.jpeg')" : "none",
         backgroundSize: "cover",
         backgroundPosition: "left center",
         backgroundRepeat: "no-repeat",
         backgroundAttachment: "fixed",
+        backgroundColor: isDark ? colors.background.primary : colors.background.secondary,
         fontFamily:
           '-apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif',
+        transition: "background-color 0.3s ease",
       }}
     >
       <style jsx>{`
@@ -151,7 +148,7 @@ function LoginInner() {
           .login-card {
             flex-direction: column !important;
             border-radius: 20px !important;
-            box-shadow: 0 20px 60px rgba(15,23,42,0.6) !important;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3) !important;
           }
           .login-left-panel {
             display: none !important;
@@ -209,15 +206,57 @@ function LoginInner() {
           }
         }
       `}</style>
-      <div className="login-container" style={{ width: "80%", maxWidth: 850, marginRight: "350px" }}>
+
+      {/* Theme Toggle Button */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        style={{
+          position: "fixed",
+          top: 20,
+          right: 20,
+          zIndex: 1000,
+          width: 48,
+          height: 48,
+          borderRadius: "50%",
+          border: `2px solid ${colors.border.default}`,
+          backgroundColor: colors.background.card,
+          color: colors.text.primary,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          fontSize: 20,
+          boxShadow: colors.card.shadow,
+          transition: "all 0.3s ease",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = "scale(1.1)";
+          e.currentTarget.style.borderColor = colors.primary[500];
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = "scale(1)";
+          e.currentTarget.style.borderColor = colors.border.default;
+        }}
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      >
+        {theme === "dark" ? "☀️" : "🌙"}
+      </button>
+
+      <div
+        className="login-container"
+        style={{ width: "80%", maxWidth: 850, marginRight: "350px" }}
+      >
         <div
           className="login-card"
           style={{
             display: "flex",
             borderRadius: 30,
             overflow: "hidden",
-            backgroundColor: "#ffffff",
-            boxShadow: "0 28px 80px rgba(15,23,42,0.75)",
+            backgroundColor: colors.background.card,
+            boxShadow: colors.card.shadow,
+            border: `1px solid ${colors.border.default}`,
+            transition: "all 0.3s ease",
           }}
         >
           {/* LEFT PANEL */}
@@ -227,8 +266,7 @@ function LoginInner() {
               flex: "1 1 50%",
               position: "relative",
               padding: "32px 36px",
-              background:
-                "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
+              background: gradient,
               color: "#f9fafb",
               display: "flex",
               flexDirection: "column",
@@ -243,10 +281,9 @@ function LoginInner() {
                 width: 120,
                 height: 120,
                 borderRadius: "50%",
-                background:
-                  "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
+                background: gradient,
                 opacity: 0.9,
-                boxShadow: "0 20px 52px rgba(15,23,42,0.7)",
+                boxShadow: "0 20px 52px rgba(0, 0, 0, 0.7)",
               }}
             />
             <div
@@ -257,8 +294,7 @@ function LoginInner() {
                 width: 95,
                 height: 95,
                 borderRadius: "50%",
-                background:
-                  "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
+                background: gradient,
                 opacity: 0.95,
               }}
             />
@@ -270,8 +306,7 @@ function LoginInner() {
                 width: 52,
                 height: 52,
                 borderRadius: "50%",
-                background:
-                  "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
+                background: gradient,
                 opacity: 0.95,
               }}
             />
@@ -287,8 +322,8 @@ function LoginInner() {
                   justifyContent: "center",
                   marginBottom: 24,
                   overflow: "hidden",
-                  border: "2px solid #58D34D",
-                  boxShadow: "0 18px 38px rgba(15,23,42,0.85)",
+                  border: `2px solid ${colors.secondary[500]}`,
+                  boxShadow: "0 18px 38px rgba(0, 0, 0, 0.85)",
                 }}
               >
                 <img
@@ -328,28 +363,6 @@ function LoginInner() {
               </p>
             </div>
 
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => router.push("/register")}
-                style={{
-                  marginTop: 10,
-                  padding: "8px 16px",
-                  borderRadius: 99,
-                  border: "1px solid rgba(191,219,254,0.8)",
-                  backgroundColor: "#08142bff",
-                  color: "#e5e7eb",
-                  fontSize: 12,
-                  cursor: "pointer",
-                  alignSelf: "flex-start",
-                  boxShadow: "0 12px 28px rgba(15,23,42,0.6)",
-                  opacity: 0.95,
-                }}
-              >
-                New user? Register here
-              </button>
-            )}
-
             <div
               style={{
                 position: "relative",
@@ -370,9 +383,10 @@ function LoginInner() {
             style={{
               flex: "1 1 50%",
               padding: "30px 36px 28px",
-              backgroundColor: "#ffffff",
+              backgroundColor: colors.background.card,
               display: "flex",
               flexDirection: "column",
+              transition: "background-color 0.3s ease",
             }}
           >
             <div className="login-form-title" style={{ marginBottom: 16 }}>
@@ -380,7 +394,7 @@ function LoginInner() {
                 style={{
                   fontSize: 24,
                   fontWeight: 700,
-                  color: "#0F162A",
+                  color: colors.text.primary,
                   letterSpacing: 0.5,
                 }}
               >
@@ -406,16 +420,17 @@ function LoginInner() {
                   borderRadius: 999,
                   border:
                     mode === "HR"
-                      ? "2px solid rgba(96,165,250,1)"
-                      : "2px solid rgba(199,210,254,0.9)",
+                      ? `2px solid ${colors.primary[500]}`
+                      : `2px solid ${colors.border.default}`,
                   backgroundColor:
                     mode === "HR"
-                      ? "rgba(59,130,246,0.06)"
+                      ? `${colors.primary[500]}15`
                       : "transparent",
-                  color: "#0F162A",
+                  color: colors.text.primary,
                   fontSize: 13,
                   fontWeight: 600,
                   cursor: "pointer",
+                  transition: "all 0.2s ease",
                 }}
               >
                 HR
@@ -432,17 +447,18 @@ function LoginInner() {
                   borderRadius: 999,
                   border:
                     mode === "EMPLOYEE"
-                      ? "2px solid rgba(96,165,250,1)"
-                      : "2px solid rgba(199,210,254,0.9)",
+                      ? `2px solid ${colors.primary[500]}`
+                      : `2px solid ${colors.border.default}`,
                   backgroundColor:
                     mode === "EMPLOYEE"
-                      ? "rgba(59,130,246,0.06)"
+                      ? `${colors.primary[500]}15`
                       : "transparent",
-                  color: "#0F162A",
+                  color: colors.text.primary,
                   fontSize: 13,
                   fontWeight: 600,
                   cursor: employeeLoginLocked ? "not-allowed" : "pointer",
                   opacity: employeeLoginLocked ? 0.4 : 1,
+                  transition: "all 0.2s ease",
                 }}
               >
                 Employee
@@ -455,10 +471,10 @@ function LoginInner() {
                 style={{
                   padding: "8px 10px",
                   borderRadius: 10,
-                  backgroundColor: "#fee2e2",
-                  border: "1px solid #fecaca",
+                  backgroundColor: isDark ? "#7f1d1d" : "#fee2e2",
+                  border: `1px solid ${isDark ? "#991b1b" : "#fecaca"}`,
                   fontSize: 12,
-                  color: "#b91c1c",
+                  color: isDark ? "#fca5a5" : "#b91c1c",
                   marginBottom: 10,
                 }}
               >
@@ -475,12 +491,13 @@ function LoginInner() {
                 style={{
                   padding: "14px 16px 16px",
                   borderRadius: 18,
-                  backgroundColor: "#f9fafb",
-                  border: "1px solid rgba(148,163,184,0.6)",
-                  boxShadow: "0 16px 36px rgba(148,163,184,0.35)",
+                  backgroundColor: colors.background.secondary,
+                  border: `1px solid ${colors.border.default}`,
+                  boxShadow: colors.card.shadow,
                   display: "flex",
                   flexDirection: "column",
                   gap: 10,
+                  transition: "all 0.3s ease",
                 }}
               >
                 <div
@@ -491,7 +508,7 @@ function LoginInner() {
                       fontSize: 12,
                       letterSpacing: 1.5,
                       textTransform: "uppercase",
-                      color: "#6b7280",
+                      color: colors.text.secondary,
                       fontWeight: 600,
                     }}
                   >
@@ -506,11 +523,20 @@ function LoginInner() {
                     style={{
                       padding: "10px 13px",
                       borderRadius: 12,
-                      border: "1px solid #0F162A",
-                      backgroundColor: "#eef2ff",
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.input.background,
                       fontSize: 14,
                       outline: "none",
-                      color: "#111827",
+                      color: colors.input.color,
+                      transition: "all 0.2s ease",
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = colors.primary[500];
+                      e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = colors.border.input;
+                      e.currentTarget.style.boxShadow = "none";
                     }}
                   />
                 </div>
@@ -523,7 +549,7 @@ function LoginInner() {
                       fontSize: 12,
                       letterSpacing: 1.5,
                       textTransform: "uppercase",
-                      color: "#6b7280",
+                      color: colors.text.secondary,
                       fontWeight: 600,
                     }}
                   >
@@ -538,11 +564,20 @@ function LoginInner() {
                     style={{
                       padding: "10px 13px",
                       borderRadius: 12,
-                      border: "1px solid #0F162A",
-                      backgroundColor: "#eef2ff",
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.input.background,
                       fontSize: 14,
                       outline: "none",
-                      color: "#111827",
+                      color: colors.input.color,
+                      transition: "all 0.2s ease",
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = colors.primary[500];
+                      e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = colors.border.input;
+                      e.currentTarget.style.boxShadow = "none";
                     }}
                   />
                 </div>
@@ -557,16 +592,26 @@ function LoginInner() {
                     borderRadius: 999,
                     border: "none",
                     width: "100%",
-                    background:
-                      "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
+                    background: gradient,
                     color: "#ffffff",
                     fontSize: 14,
                     fontWeight: 700,
                     letterSpacing: 1.5,
                     textTransform: "uppercase",
                     cursor: loading ? "default" : "pointer",
-                    boxShadow: "0 16px 36px rgba(79,70,229,0.55)",
+                    boxShadow: `0 16px 36px ${colors.primary[500]}55`,
                     opacity: loading ? 0.75 : 1,
+                    transition: "all 0.3s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) {
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                      e.currentTarget.style.boxShadow = `0 20px 40px ${colors.primary[500]}66`;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = `0 16px 36px ${colors.primary[500]}55`;
                   }}
                 >
                   {loading ? "SIGNING IN..." : "SIGN IN"}
@@ -578,11 +623,11 @@ function LoginInner() {
                 style={{
                   padding: "14px 16px 16px",
                   borderRadius: 18,
-                  backgroundColor: "#fef2f2",
-                  border: "1px solid #fecaca",
-                  boxShadow: "0 16px 36px rgba(248,113,113,0.35)",
+                  backgroundColor: isDark ? "#7f1d1d" : "#fef2f2",
+                  border: `1px solid ${isDark ? "#991b1b" : "#fecaca"}`,
+                  boxShadow: colors.card.shadow,
                   fontSize: 13,
-                  color: "#991b1b",
+                  color: isDark ? "#fca5a5" : "#991b1b",
                 }}
               >
                 Employee login is currently locked by administration.
@@ -590,18 +635,19 @@ function LoginInner() {
                 Please contact HR if you believe this is a mistake.
               </div>
             ) : (
-              // EMPLOYEE FORM – ONLY EMP CODE (not reachable while locked)
+              // EMPLOYEE FORM – ONLY EMP CODE
               <form
                 onSubmit={handleEmployeeSubmit}
                 style={{
                   padding: "14px 16px 16px",
                   borderRadius: 18,
-                  backgroundColor: "#f9fafb",
-                  border: "1px solid rgba(148,163,184,0.6)",
-                  boxShadow: "0 16px 36px rgba(148,163,184,0.35)",
+                  backgroundColor: colors.background.secondary,
+                  border: `1px solid ${colors.border.default}`,
+                  boxShadow: colors.card.shadow,
                   display: "flex",
                   flexDirection: "column",
                   gap: 10,
+                  transition: "all 0.3s ease",
                 }}
               >
                 <div
@@ -612,7 +658,8 @@ function LoginInner() {
                       fontSize: 12,
                       letterSpacing: 1.5,
                       textTransform: "uppercase",
-                      color: "#9ca3af",
+                      color: colors.text.secondary,
+                      fontWeight: 600,
                     }}
                   >
                     Employee Code
@@ -625,11 +672,20 @@ function LoginInner() {
                     style={{
                       padding: "10px 13px",
                       borderRadius: 12,
-                      border: "1px solid #0F162A",
-                      backgroundColor: "#eef2ff",
+                      border: `1px solid ${colors.border.input}`,
+                      backgroundColor: colors.input.background,
                       fontSize: 14,
                       outline: "none",
-                      color: "#111827",
+                      color: colors.input.color,
+                      transition: "all 0.2s ease",
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = colors.primary[500];
+                      e.currentTarget.style.boxShadow = `0 0 0 3px ${colors.primary[500]}20`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = colors.border.input;
+                      e.currentTarget.style.boxShadow = "none";
                     }}
                   />
                 </div>
@@ -643,16 +699,26 @@ function LoginInner() {
                     borderRadius: 999,
                     border: "none",
                     width: "100%",
-                    background:
-                      "linear-gradient(135deg, #0F162A, #0c225cff, #58D34D)",
-                    color: "#ffffffff",
+                    background: gradient,
+                    color: "#ffffff",
                     fontSize: 14,
                     fontWeight: 700,
                     letterSpacing: 2,
                     textTransform: "uppercase",
                     cursor: loading ? "default" : "pointer",
-                    boxShadow: "0 16px 36px rgba(34,197,94,0.5)",
+                    boxShadow: `0 16px 36px ${colors.secondary[500]}50`,
                     opacity: loading ? 0.75 : 1,
+                    transition: "all 0.3s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) {
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                      e.currentTarget.style.boxShadow = `0 20px 40px ${colors.secondary[500]}66`;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = `0 16px 36px ${colors.secondary[500]}50`;
                   }}
                 >
                   {loading ? "Checking..." : "Submit"}
@@ -665,7 +731,7 @@ function LoginInner() {
               style={{
                 marginTop: 16,
                 fontSize: 11,
-                color: "#9ca3af",
+                color: colors.text.tertiary,
                 textAlign: "center",
               }}
             >

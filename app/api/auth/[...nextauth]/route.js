@@ -35,8 +35,13 @@ export const authOptions = {
         if (mode === "HR") {
           if (!email || !password) return null;
 
-          // allow both HR and ADMIN users
-          const user = await User.findOne({ email });
+          // Optimize: Use lean() and select only needed fields for faster query
+          // Email is indexed, so this should be fast
+          const user = await User.findOne({ email })
+            .select('_id email passwordHash role employeeEmpCode name')
+            .lean()
+            .maxTimeMS(3000); // 3 second timeout
+            
           if (!user || !["HR", "ADMIN"].includes(user.role)) {
             console.log(
               "[NextAuth] HR/ADMIN user not found or invalid role",
@@ -64,18 +69,27 @@ export const authOptions = {
         if (mode === "EMPLOYEE") {
           if (!empCode) return null;
 
-          // find employee just by empCode
-          const employee = await Employee.findOne({ empCode }).lean();
+          // Optimize: Use lean() and select only needed fields
+          // empCode is indexed, so this should be fast
+          const employee = await Employee.findOne({ empCode })
+            .select('_id name email department designation shift')
+            .lean()
+            .maxTimeMS(3000); // 3 second timeout
+            
           if (!employee) {
             console.log("[NextAuth] Employee not found", empCode);
             return null;
           }
 
-          // optional: if you also have a User record for employees
+          // Optional: Check for User record (only if needed)
+          // This is a separate query, but it's optional and uses indexed field
           const user = await User.findOne({
             employeeEmpCode: empCode,
             role: "EMPLOYEE",
-          }).lean();
+          })
+            .select('_id email')
+            .lean()
+            .maxTimeMS(2000); // 2 second timeout
 
           return {
             id: (user?._id || employee._id).toString(),

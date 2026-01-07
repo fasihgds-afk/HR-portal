@@ -31,8 +31,9 @@ import { connectDB } from '../../../../lib/db';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Shift from '../../../../models/Shift';
+import ViolationRules from '../../../../models/ViolationRules';
 import { normalizeStatus, extractShiftCode } from '../../../../lib/calculations';
-import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts } from '../../../../lib/calculations';
+import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts, getLeaveDeductionDays, getMissingPunchDeductionDays } from '../../../../lib/calculations';
 import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
 import { generateCacheKey, getOrSetCache, invalidateCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
 // EmployeeShiftHistory removed - using only employee's current shift assignment
@@ -416,6 +417,41 @@ export async function GET(req) {
       cacheKey,
       async () => {
         await connectDB();
+
+        // Fetch active violation rules from database (with caching)
+        const violationRules = await getOrSetCache(
+          'active-violation-rules',
+          async () => {
+            const rules = await ViolationRules.findOne({ isActive: true }).lean();
+            if (!rules) {
+              // Return default rules if none exist
+              return {
+                violationConfig: {
+                  freeViolations: 2,
+                  milestoneInterval: 3,
+                  perMinuteRate: 0.007,
+                  maxPerMinuteFine: 1.0,
+                },
+                absentConfig: {
+                  bothMissingDays: 1.0,
+                  partialPunchDays: 1.0,
+                  leaveWithoutInformDays: 1.5,
+                },
+                leaveConfig: {
+                  unpaidLeaveDays: 1.0,
+                  sickLeaveDays: 1.0,
+                  halfDayDays: 0.5,
+                  paidLeaveDays: 0.0,
+                },
+                salaryConfig: {
+                  daysPerMonth: 30,
+                },
+              };
+            }
+            return rules;
+          },
+          CACHE_TTL.SHIFTS || 600 // Cache for 10 minutes
+        );
 
         // Check if Shift collection has any documents (to avoid unnecessary queries)
         const shiftCount = await Shift.countDocuments({ isActive: true });
@@ -1001,69 +1037,53 @@ export async function GET(req) {
 
           // DETERMINE DEDUCTION TYPE BASED ON VIOLATION NUMBER:
           // ---------------------------------------------------
-          // Pattern check: Is this a "milestone" violation? (3rd, 6th, 9th, 12th, ...)
-          // These are multiples of 3: 3, 6, 9, 12, 15, 18, 21, ...
-          if (vNo % 3 === 0) {
-            // ✓ MILESTONE VIOLATION: Add 1 FULL DAY deduction
-            // This happens at violations: 3, 6, 9, 12, 15, 18, 21, ...
-            //
-            // Accumulation pattern:
-            //   vNo=3  → violationBaseDays = 1 (total: 1 day)
-            //   vNo=6  → violationBaseDays = 2 (total: 2 days)
-            //   vNo=9  → violationBaseDays = 3 (total: 3 days)
-            //   vNo=12 → violationBaseDays = 4 (total: 4 days)
-            violationBaseDays += 1;
-            
-            // Note: No per-minute fine for milestone violations (full day only)
-          } else if (vNo > 3) {
-            // ✓ REGULAR VIOLATION: Apply per-minute fine
-            // This happens at violations: 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, ...
-            // (All violations after 3rd that are NOT multiples of 3)
-            //
-            // PER-MINUTE FINE CALCULATION:
-            // ----------------------------
-            // Formula: fineForDay = violationMinutes × 0.007 days/minute
-            // Cap: Maximum 1 day per violation (prevents excessive fines)
-            //
-            // Example calculations:
-            //   - 10 minutes late → 10 × 0.007 = 0.07 days
-            //   - 30 minutes late → 30 × 0.007 = 0.21 days
-            //   - 60 minutes late → 60 × 0.007 = 0.42 days
-            //   - 143 minutes late → 143 × 0.007 = 1.001 → capped at 1.0 day
-            //   - 200 minutes late → 200 × 0.007 = 1.4 → capped at 1.0 day
-            const fineForThisDay = Math.min(dayViolationMinutes * 0.007, 1.0);
-            perMinuteFineDays += fineForThisDay;
-            
-            // DEBUG LOGGING: Flag suspiciously high fines for investigation
-            // (Fines at cap or extremely high violation minutes may indicate data issues)
-            if (fineForThisDay >= 1.0 || dayViolationMinutes > 200) {
-              console.log(`[DEBUG] High per-minute fine for ${emp.empCode} on ${date}:`, {
-                empCode: emp.empCode,
-                date,
-                violationDay: vNo,
-                dayViolationMinutes,
-                fineForThisDay,
-                late,
-                earlyLeave,
-                lateMinutes,
-                earlyMinutes,
-              });
+          // Use violation rules from database
+          const vConfig = violationRules.violationConfig;
+          
+          // Skip free violations (1st, 2nd, etc.) - no deduction for these
+          if (vNo > vConfig.freeViolations) {
+            // Pattern check: Is this a "milestone" violation? (3rd, 6th, 9th, 12th, ...)
+            // These are multiples of milestoneInterval
+            if (vNo % vConfig.milestoneInterval === 0) {
+              // ✓ MILESTONE VIOLATION: Add 1 FULL DAY deduction
+              violationBaseDays += 1;
+              
+              // Note: No per-minute fine for milestone violations (full day only)
+            } else {
+              // ✓ REGULAR VIOLATION: Apply per-minute fine
+              // PER-MINUTE FINE CALCULATION:
+              // ----------------------------
+              // Formula: fineForDay = violationMinutes × perMinuteRate
+              // Cap: Maximum maxPerMinuteFine days per violation
+              const fineForThisDay = Math.min(
+                dayViolationMinutes * vConfig.perMinuteRate,
+                vConfig.maxPerMinuteFine
+              );
+              perMinuteFineDays += fineForThisDay;
+              
+              // DEBUG LOGGING: Flag suspiciously high fines for investigation
+              if (fineForThisDay >= vConfig.maxPerMinuteFine || dayViolationMinutes > 200) {
+                console.log(`[DEBUG] High per-minute fine for ${emp.empCode} on ${date}:`, {
+                  empCode: emp.empCode,
+                  date,
+                  violationDay: vNo,
+                  dayViolationMinutes,
+                  fineForThisDay,
+                  late,
+                  earlyLeave,
+                  lateMinutes,
+                  earlyMinutes,
+                });
+              }
             }
           }
-          // Note: vNo <= 3 but not multiple of 3 means violations #1 and #2 are FREE (no deduction)
+          // Note: vNo <= freeViolations means violations #1, #2, etc. are FREE (no deduction)
         }
 
         // ----------------- ABSENT / MISSING PUNCH DEDUCTION -----------------------
-        // According to new policy:
-        // - Missing BOTH check-in AND check-out = 1 day salary deduction
-        // - Missing ONLY check-in OR ONLY check-out = 1.5 days salary deduction
-        // - Leave Without Inform status = 1.5 days salary deduction
-        // - Paid Leave = NO salary deduction
-        // - Unpaid Leave = 1 full day salary deduction
-        // - Sick Leave = 1 full day salary deduction (treated as unpaid)
-        
+        // Use rules from database
         const partialPunch = (checkIn && !checkOut) || (!checkIn && checkOut);
-        // bothMissing already defined above (line 599)
+        // bothMissing already defined above
         const excusedForMissing = earlyExcused || lateExcused;
         
         // Determine if this is an absent day (missing punch OR no punch at all)
@@ -1077,34 +1097,26 @@ export async function GET(req) {
           status !== 'Leave Without Inform' &&
           !excusedForMissing;
         
-        // Apply absent deduction (only once, not double counted)
+        // Apply absent deduction using database rules
         // IMPORTANT: Don't count if it's already a leave (Unpaid Leave, Sick Leave, or Leave Without Inform)
         if (isAbsentDay && !isWeekendOff && status !== 'Un Paid Leave' && status !== 'Sick Leave' && status !== 'Leave Without Inform') {
-          if (bothMissing) {
-            // Both check-in and check-out missing = 1 day deduction
-            absentDays += 1;
-          } else if (partialPunch) {
-            // Only one punch missing = 1 day deduction (not 1.5)
-            absentDays += 1;
-          }
+          const missingPunchDays = getMissingPunchDeductionDays(bothMissing, partialPunch, violationRules.absentConfig);
+          absentDays += missingPunchDays;
         }
 
         // ----------------- LEAVE / HALF-DAY RULES ----------------
-        // Unpaid Leave and Sick Leave both deduct 1 full day salary
-        if (status === 'Un Paid Leave') {
-          unpaidLeaveDays += 1; // 1 full day deduction
-        } else if (status === 'Sick Leave') {
-          // Sick leave is treated as unpaid (1 day deduction) per policy
-          unpaidLeaveDays += 1;
+        // Use database rules for leave deductions
+        const leaveDeduction = getLeaveDeductionDays(status, violationRules.leaveConfig, violationRules.absentConfig);
+        
+        if (status === 'Un Paid Leave' || status === 'Sick Leave') {
+          unpaidLeaveDays += leaveDeduction;
         } else if (status === 'Leave Without Inform') {
-          // Leave Without Inform = 1.5 days salary deduction
-          absentDays += 1.5;
+          // Leave Without Inform is handled in absentConfig
+          absentDays += leaveDeduction;
+        } else if (status === 'Half Day') {
+          halfDays += leaveDeduction;
         }
         // Paid Leave = no deduction (excluded from all deduction logic)
-
-        if (status === 'Half Day') {
-          halfDays += 0.5;
-        }
 
         days.push({
           date,
@@ -1250,10 +1262,17 @@ export async function GET(req) {
       }
 
       const grossSalary = emp.monthlySalary || 0;
-      // You can change divisor (30) to 26 or 31 if company policy is different
-      const perDaySalary = grossSalary > 0 ? grossSalary / 30 : 0;
-      const salaryDeductAmount = perDaySalary * salaryDeductDays;
-      const netSalary = grossSalary - salaryDeductAmount;
+      // Use actual days in the month for salary calculation (more accurate than fixed 30 days)
+      // This handles months with 28, 29, 30, or 31 days correctly
+      const actualDaysInMonth = daysInMonth; // Already calculated from the month
+      const salaryCalc = calculateSalaryAmounts(
+        grossSalary, 
+        salaryDeductDays, 
+        { daysPerMonth: actualDaysInMonth } // Use actual month days instead of rule's default
+      );
+      const perDaySalary = salaryCalc.perDaySalary;
+      const salaryDeductAmount = salaryCalc.deductionAmount;
+      const netSalary = salaryCalc.netSalary;
 
       // Get dynamic shift for the employee - use current shift assignment (no history)
       let dynamicShift = emp.shift || '';
@@ -1333,12 +1352,12 @@ export async function GET(req) {
       });
     });
 
-        // Return data for caching
-        return {
-          month: monthPrefix,
-          daysInMonth,
-          employees: employeesOut,
-        };
+    // Return data for caching
+    return {
+      month: monthPrefix,
+      daysInMonth,
+      employees: employeesOut,
+    };
       },
       CACHE_TTL.MONTHLY_ATTENDANCE
     );

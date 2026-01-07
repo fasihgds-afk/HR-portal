@@ -704,6 +704,36 @@ export default function HrDashboardPage() {
             </div>
 
             <button
+              onClick={() => router.push('/hr/violation-rules')}
+              style={{
+                padding: '10px 20px',
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 6px 20px rgba(245, 158, 11, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2)',
+                transition: 'all 0.2s',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(245, 158, 11, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 6px 20px rgba(245, 158, 11, 0.4)';
+              }}
+            >
+              ⚖️ Violation Rules
+            </button>
+
+            <button
               onClick={handleLoadAndSave}
               disabled={loading}
               style={{
