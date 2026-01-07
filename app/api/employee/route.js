@@ -76,13 +76,11 @@ export async function GET(req) {
       pipeline.push(projectionStage);
     }
     
-    // Execute aggregation (returns plain objects by default)
-    const [employeesResult, total] = await Promise.all([
-      Employee.aggregate(pipeline),
-      Employee.countDocuments(queryFilter),
-    ]);
+    // Execute aggregation first (returns plain objects by default)
+    const employees = await Employee.aggregate(pipeline);
     
-    const employees = employeesResult || [];
+    // Then execute count separately
+    const total = await Employee.countDocuments(queryFilter);
 
     return NextResponse.json({
       items: employees || [],
