@@ -750,7 +750,9 @@ export default function EmployeeShiftPage() {
 
             showToast('success', `Employee ${empCode} deleted successfully`);
             setDeleteConfirm({ isOpen: false, employee: null });
-            loadEmployees(); // Refresh the list
+            
+            // Force refresh to get latest data from server (bypass cache)
+            loadEmployees(true);
           } catch (err) {
             console.error(err);
             showToast('error', err.message || 'Failed to delete employee');
