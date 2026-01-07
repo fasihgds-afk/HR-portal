@@ -9,7 +9,9 @@ import { validateEmployee } from '../../../lib/validations/employee';
 import { rateLimiters } from '../../../lib/middleware/rateLimit';
 // Removed monitorQuery import - using direct queries to prevent double execution
 
+// Force dynamic rendering and disable all caching to prevent Mongoose query issues
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 // GET /api/employee
 // - /api/employee?empCode=943425  -> single employee { employee: {...} }
@@ -81,32 +83,37 @@ export async function GET(req) {
       : CACHE_TTL.EMPLOYEES; // 30 seconds for filtered/other pages
     
     // PRODUCTION-SAFE: Use native MongoDB driver directly (avoid Mongoose double-execution issues on Vercel)
-    // Native driver is more reliable in serverless environments
+    // Native driver is more reliable in serverless environments - COMPLETELY BYPASSES MONGOOSE
     const fetchEmployees = async () => {
       const skip = (page - 1) * limit;
       
-      // Use native MongoDB driver directly - no Mongoose query objects that can be double-executed
+      // Get native MongoDB collection directly - NO MONGOOSE INVOLVEMENT
       const col = Employee.collection;
       
       // Ensure filter is a valid object (empty object is valid for "find all")
       const queryFilter = filter && Object.keys(filter).length > 0 ? filter : {};
       
-      // Build options for native driver find() method
-      // Projection must be passed in options object, not as separate method
-      const findOptions = {};
-      if (listProjection && Object.keys(listProjection).length > 0) {
-        findOptions.projection = listProjection;
-      }
+      // Native driver syntax: find(filter, options) - options can include projection, sort, skip, limit
+      // OR use method chaining: find(filter).sort().skip().limit().toArray()
+      // Using method chaining is more reliable for serverless environments
       
       try {
-        // Execute queries using native driver (more reliable in production/serverless)
+        // Build find cursor with method chaining (most reliable approach)
+        let cursor = col.find(queryFilter);
+        
+        // Apply projection if specified
+        if (listProjection && Object.keys(listProjection).length > 0) {
+          cursor = cursor.project(listProjection);
+        }
+        
+        // Apply sort, skip, limit
+        cursor = cursor.sort(sortOptions || { empCode: 1 });
+        cursor = cursor.skip(skip);
+        cursor = cursor.limit(limit);
+        
+        // Execute queries using native driver - NO MONGOOSE INVOLVEMENT
         const [employees, total] = await Promise.all([
-          col
-            .find(queryFilter, findOptions)
-            .sort(sortOptions || { empCode: 1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray(),
+          cursor.toArray(),
           hasFilters
             ? col.countDocuments(queryFilter)
             : col.estimatedDocumentCount(),
@@ -122,16 +129,32 @@ export async function GET(req) {
           },
         };
       } catch (err) {
-        // If native driver fails, log and rethrow (shouldn't happen, but just in case)
-        console.error('[Employee API] Native driver query failed:', err);
+        // Log detailed error for debugging
+        console.error('[Employee API] Native driver query failed:', {
+          message: err.message,
+          name: err.name,
+          stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+          filter,
+          skip,
+          limit,
+        });
         throw err;
       }
     };
 
-    // TEMPORARILY DISABLE CACHE to avoid cached Mongoose query objects
-    // Fetch directly every time to ensure we're using native driver
+    // DISABLE CACHE - Fetch directly every time to ensure we're using native driver
+    // This prevents any cached Mongoose query objects from being returned
     const result = await fetchEmployees();
-    return NextResponse.json(result);
+    
+    // Add cache-busting headers to prevent Vercel from caching the response
+    return NextResponse.json(result, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-Cache-Status': 'BYPASS',
+      },
+    });
   } catch (err) {
     const { handleError } = await import('../../../lib/errors/errorHandler');
     return handleError(err, req);
