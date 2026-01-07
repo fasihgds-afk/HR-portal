@@ -114,15 +114,16 @@ export default function EmployeeShiftPage() {
         params.set('shift', selectedShift);
       }
       
-      // Add cache-busting timestamp if forcing refresh
+      // Add cache-busting parameter to bypass server-side cache
       if (forceRefresh) {
-        params.set('_t', Date.now().toString());
+        params.set('_t', Date.now().toString()); // Server will bypass cache when this is present
       }
 
       const res = await fetch(`/api/employee?${params.toString()}`, {
-        cache: forceRefresh ? 'no-store' : 'default', // Force fresh fetch after updates
+        cache: 'no-store', // Always bypass browser cache
         headers: {
-          'Cache-Control': forceRefresh ? 'no-cache' : 'default',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
       });
       

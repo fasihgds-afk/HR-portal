@@ -61,36 +61,48 @@ export async function GET(req) {
     // Use optimized projection (exclude base64 images for list views)
     const listProjection = getEmployeeProjection(false);
 
-    // Generate cache key based on query parameters
+    // Check if client wants to bypass cache (for real-time updates)
+    const bypassCache = searchParams.get('_t') || searchParams.get('no-cache');
+    
+    // Fetch function
+    const fetchEmployees = async () => {
+      // Calculate pagination
+      const skip = (page - 1) * limit;
+      
+      // Get total count for pagination
+      const total = await Employee.countDocuments(filter);
+      
+      // Get paginated employees with optimized projection
+      const employees = await Employee.find(filter, listProjection)
+        .sort({ empCode: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      return {
+        items: employees,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    };
+
+    // If bypassing cache, fetch directly
+    if (bypassCache) {
+      const result = await fetchEmployees();
+      return NextResponse.json(result);
+    }
+
+    // Otherwise, use cache for better performance
     const cacheKey = generateCacheKey('employees', searchParams);
     
     // Get from cache or fetch from database
     const result = await getOrSetCache(
       cacheKey,
-      async () => {
-        // Calculate pagination
-        const skip = (page - 1) * limit;
-        
-        // Get total count for pagination
-        const total = await Employee.countDocuments(filter);
-        
-        // Get paginated employees with optimized projection
-        const employees = await Employee.find(filter, listProjection)
-          .sort({ empCode: 1 })
-          .skip(skip)
-          .limit(limit)
-          .lean();
-
-        return {
-          items: employees,
-          pagination: {
-            page,
-            limit,
-            total,
-            totalPages: Math.ceil(total / limit),
-          },
-        };
-      },
+      fetchEmployees,
       CACHE_TTL.EMPLOYEES
     );
 

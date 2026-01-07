@@ -102,8 +102,8 @@ export function invalidateEmployeeCache() {
  * Cache TTL constants (in seconds)
  */
 export const CACHE_TTL = {
-  EMPLOYEES: 300,        // 5 minutes
-  EMPLOYEE_SINGLE: 600,  // 10 minutes
+  EMPLOYEES: 60,        // 1 minute (reduced for better real-time updates)
+  EMPLOYEE_SINGLE: 300,  // 5 minutes (reduced from 10)
   DAILY_ATTENDANCE: 120, // 2 minutes
   MONTHLY_ATTENDANCE: 300, // 5 minutes
   SHIFTS: 600,          // 10 minutes
