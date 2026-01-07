@@ -65,9 +65,11 @@ export async function GET(req) {
     // Check if client wants to bypass cache (for real-time updates)
     const bypassCache = searchParams.get('_t') || searchParams.get('no-cache');
     
-    // PERFORMANCE: For first page with no filters, use longer cache
-    const isFirstPageNoFilter = page === 1 && !search && !shift && !department;
-    const cacheTTL = isFirstPageNoFilter ? CACHE_TTL.EMPLOYEES * 2 : CACHE_TTL.EMPLOYEES; // 60s for first page
+    // PERFORMANCE: For first page with no filters, use longer cache (most common query)
+    const hasFilters = Object.keys(filter).length > 0;
+    const cacheTTL = !hasFilters && page === 1 
+      ? CACHE_TTL.EMPLOYEES_NO_FILTER_FIRST_PAGE // 2 minutes for first page, no filters
+      : CACHE_TTL.EMPLOYEES; // 30 seconds for filtered/other pages
     
     // Fetch function
     const fetchEmployees = async () => {
@@ -85,32 +87,52 @@ export async function GET(req) {
       
       if (!hasFilters) {
         // No filters - fastest path: just get the data, estimate count
-        // CRITICAL: For first page (skip=0), don't use skip() - it's unnecessary and slow
-        employees = await monitorQuery(
-          () => {
-            let query = Employee.find({}, listProjection)
-              .sort({ empCode: 1 }) // Always sort by empCode (indexed)
-              .limit(limit)
-              .lean()
-              .maxTimeMS(5000); // Increased timeout for large collections
-            
-            // Only use skip if not first page
-            if (skip > 0) {
-              query = query.skip(skip);
-            }
-            
-            // Force use of empCode index for sorting
-            // This ensures MongoDB uses the index efficiently
-            return query;
-          },
-          `Employee find query (no filters, page ${page})`
-        );
-        
-        // Use estimated count for empty filter (much faster)
-        total = await monitorQuery(
-          () => Employee.estimatedDocumentCount(),
-          'Employee estimated count'
-        );
+        // CRITICAL OPTIMIZATION: For first page, use the most efficient query possible
+        // Run queries in parallel for better performance
+        [employees, total] = await Promise.all([
+          monitorQuery(
+            async () => {
+              // For first page, use the most optimized query
+              if (page === 1 && skip === 0) {
+                // Direct query with index hint - fastest possible
+                // Use collection-level query for maximum performance
+                const query = Employee.find({}, listProjection)
+                  .sort({ empCode: 1 }) // Sort by indexed field
+                  .limit(limit)
+                  .lean()
+                  .maxTimeMS(2000); // Stricter timeout for first page
+                
+                // Force MongoDB to use the empCode index
+                // This is critical for performance on large collections
+                try {
+                  // Try to hint the index - if it fails, continue without hint
+                  return await query.hint({ empCode: 1 });
+                } catch (hintError) {
+                  // If hint fails (index might not exist or have different name), use query without hint
+                  // In production, this should not happen if indexes are properly created
+                  if (process.env.NODE_ENV === 'development') {
+                    console.warn('Index hint failed, using default query plan:', hintError.message);
+                  }
+                  return await query;
+                }
+              } else {
+                // For subsequent pages, we need skip (slower but necessary)
+                return await Employee.find({}, listProjection)
+                  .sort({ empCode: 1 })
+                  .skip(skip)
+                  .limit(limit)
+                  .lean()
+                  .maxTimeMS(3000);
+              }
+            },
+            `Employee find query (no filters, page ${page})`
+          ),
+          // Use estimated count for empty filter (much faster than countDocuments)
+          monitorQuery(
+            () => Employee.estimatedDocumentCount().maxTimeMS(1000),
+            'Employee estimated count'
+          ),
+        ]);
       } else {
         // Has filters - need accurate count
         [total, employees] = await Promise.all([

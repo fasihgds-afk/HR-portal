@@ -33,11 +33,20 @@ export async function explainQuery(query) {
  * Log slow queries (queries taking longer than threshold)
  * @param {string} operation - Operation name
  * @param {number} duration - Duration in milliseconds
- * @param {number} threshold - Threshold in milliseconds (default: 1000ms)
+ * @param {number} threshold - Threshold in milliseconds (default: 2000ms for production)
  */
-export function logSlowQuery(operation, duration, threshold = 1000) {
-  if (duration > threshold) {
+export function logSlowQuery(operation, duration, threshold = 2000) {
+  // In production, be more lenient with warnings (network latency, large collections)
+  // In development, use stricter threshold to catch real issues
+  const actualThreshold = process.env.NODE_ENV === 'production' ? 3000 : 1000;
+  
+  if (duration > actualThreshold) {
     console.warn(`⚠️ Slow query detected: ${operation} took ${duration}ms`);
+    
+    // In development, provide more context
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`   Consider: checking index usage, reducing projection, or increasing cache TTL`);
+    }
   }
 }
 
