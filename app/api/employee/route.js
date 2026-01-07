@@ -7,7 +7,7 @@ import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/quer
 import { asyncHandler, NotFoundError, ValidationError } from '../../../lib/errors/errorHandler';
 import { validateEmployee } from '../../../lib/validations/employee';
 import { rateLimiters } from '../../../lib/middleware/rateLimit';
-import { monitorQuery } from '../../../lib/utils/queryPerformance';
+// Removed monitorQuery import - using direct queries to prevent double execution
 
 export const dynamic = 'force-dynamic';
 
@@ -94,89 +94,54 @@ export async function GET(req) {
         // MongoDB should automatically use the empCode index for sorting
         if (page === 1 && skip === 0) {
           // For first page, get employees first, then count (sequential to avoid overload)
-          employees = await monitorQuery(
-            async () => {
-              // CRITICAL: Use the simplest query possible with minimal projection
-              // Reduced projection to only essential fields for list view
-              const minimalProjection = {
-                _id: 1,
-                empCode: 1,
-                name: 1,
-                email: 1,
-                monthlySalary: 1,
-                shift: 1,
-                shiftId: 1,
-                department: 1,
-                designation: 1,
-                profileImageUrl: 1,
-                // Exclude: phoneNumber, cnic, saturdayGroup (not needed for list view)
-              };
-              
-              // CRITICAL FIX: Use .lean() directly - returns plain objects
-              // This prevents the "already executed" error in production
-              // .lean() executes the query and returns plain JS objects
-              const startTime = Date.now();
-              const result = await Employee.find({}, minimalProjection)
-                .sort({ empCode: 1 }) // This should use empCode_1 index
-                .limit(limit)
-                .maxTimeMS(20000)
-                .lean(); // .lean() returns plain objects directly - no conversion needed
-              
-              const queryTime = Date.now() - startTime;
-              if (process.env.NODE_ENV === 'development' && queryTime > 5000) {
-                console.warn(`[Performance] Employee query took ${queryTime}ms - consider checking MongoDB index usage`);
-              }
-              
-              return result;
-            },
-            `Employee find query (no filters, page ${page})`
-          );
+          // CRITICAL: Execute query directly without wrapper to prevent double execution
+          const minimalProjection = {
+            _id: 1,
+            empCode: 1,
+            name: 1,
+            email: 1,
+            monthlySalary: 1,
+            shift: 1,
+            shiftId: 1,
+            department: 1,
+            designation: 1,
+            profileImageUrl: 1,
+          };
+          
+          // CRITICAL: Execute query in one chain - .lean() executes and returns plain objects
+          // DO NOT call .exec() after .lean() - it causes "already executed" error
+          employees = await Employee.find({}, minimalProjection)
+            .sort({ empCode: 1 })
+            .limit(limit)
+            .maxTimeMS(20000)
+            .lean(); // .lean() executes the query and returns plain objects
           
           // Get count after employees (non-blocking, but sequential)
-          total = await monitorQuery(
-            () => Employee.estimatedDocumentCount().maxTimeMS(3000),
-            'Employee estimated count'
-          );
+          total = await Employee.estimatedDocumentCount().maxTimeMS(3000);
         } else {
           // For other pages, use parallel execution (less critical)
           [employees, total] = await Promise.all([
-            monitorQuery(
-              async () => {
-                // Use .lean() for plain objects - execute in one chain
-                return await Employee.find({}, listProjection)
-                  .sort({ empCode: 1 })
-                  .skip(skip)
-                  .limit(limit)
-                  .maxTimeMS(5000)
-                  .lean();
-              },
-              `Employee find query (no filters, page ${page})`
-            ),
-            monitorQuery(
-              () => Employee.estimatedDocumentCount().maxTimeMS(2000),
-              'Employee estimated count'
-            ),
+            // Execute query directly - .lean() executes and returns plain objects
+            Employee.find({}, listProjection)
+              .sort({ empCode: 1 })
+              .skip(skip)
+              .limit(limit)
+              .maxTimeMS(5000)
+              .lean(),
+            Employee.estimatedDocumentCount().maxTimeMS(2000),
           ]);
         }
       } else {
         // Has filters - need accurate count
         [total, employees] = await Promise.all([
-          monitorQuery(
-            () => Employee.countDocuments(filter).maxTimeMS(3000),
-            'Employee count query'
-          ),
-          monitorQuery(
-            async () => {
-              // Use .lean() for plain objects - execute in one chain
-              return await Employee.find(filter, listProjection)
-                .sort(sortOptions)
-                .skip(skip)
-                .limit(limit)
-                .maxTimeMS(3000)
-                .lean();
-            },
-            'Employee find query (with filters)'
-          ),
+          Employee.countDocuments(filter).maxTimeMS(3000),
+          // Execute query directly - .lean() executes and returns plain objects
+          Employee.find(filter, listProjection)
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limit)
+            .maxTimeMS(3000)
+            .lean(),
         ]);
       }
 
