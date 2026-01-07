@@ -56,9 +56,14 @@ export async function GET(req) {
     // Otherwise → return list with pagination (used by admin/HR UI)
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
-    const search = searchParams.get('search') || '';
-    const shift = searchParams.get('shift') || '';
-    const department = searchParams.get('department') || '';
+    const search = (searchParams.get('search') || '').trim();
+    let shift = (searchParams.get('shift') || '').trim();
+    const department = (searchParams.get('department') || '').trim();
+    
+    // Normalize "All Shifts" - empty string means all shifts
+    if (shift === 'All Shifts' || shift === 'all shifts') {
+      shift = '';
+    }
 
     // Build optimized query filter and sort options
     const { filter, sortOptions } = buildEmployeeFilter({ search, shift, department });
@@ -83,16 +88,26 @@ export async function GET(req) {
       // Use native MongoDB driver directly - no Mongoose query objects that can be double-executed
       const col = Employee.collection;
       
+      // Ensure filter is a valid object (empty object is valid for "find all")
+      const queryFilter = filter && Object.keys(filter).length > 0 ? filter : {};
+      
+      // Build options for native driver find() method
+      // Projection must be passed in options object, not as separate method
+      const findOptions = {};
+      if (listProjection && Object.keys(listProjection).length > 0) {
+        findOptions.projection = listProjection;
+      }
+      
       // Execute queries using native driver (more reliable in production/serverless)
       const [employees, total] = await Promise.all([
         col
-          .find(filter || {}, { projection: listProjection || {} })
+          .find(queryFilter, findOptions)
           .sort(sortOptions || { empCode: 1 })
           .skip(skip)
           .limit(limit)
           .toArray(),
         hasFilters
-          ? col.countDocuments(filter || {})
+          ? col.countDocuments(queryFilter)
           : col.estimatedDocumentCount(),
       ]);
 
