@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '../../../lib/db';
 import Employee from '../../../models/Employee';
+import mongoose from 'mongoose';
 import { generateCacheKey, getOrSetCache, invalidateEmployeeCache, CACHE_TTL } from '../../../lib/cache/cacheHelper';
 import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/queryOptimizer';
 import { asyncHandler, NotFoundError, ValidationError } from '../../../lib/errors/errorHandler';
@@ -10,8 +11,10 @@ import { rateLimiters } from '../../../lib/middleware/rateLimit';
 // Removed monitorQuery import - using direct queries to prevent double execution
 
 // Force dynamic rendering and disable all caching to prevent Mongoose query issues
+// Adding timestamp to force Vercel rebuild
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const runtime = 'nodejs';
 
 // GET /api/employee
 // - /api/employee?empCode=943425  -> single employee { employee: {...} }
@@ -32,27 +35,24 @@ export async function GET(req) {
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
-      const cacheKey = generateCacheKey(`employee:${empCode}`, searchParams);
+      // Get native MongoDB collection directly - BYPASS MONGOOSE MODEL ENTIRELY
+      const db = mongoose.connection.db;
+      if (!db) {
+        throw new Error('Database not connected');
+      }
+      const col = db.collection('employees'); // Use collection name directly
       
-          const result = await getOrSetCache(
-            cacheKey,
-            async () => {
-              // Use native driver for single employee (production-safe)
-              const employee = await Employee.collection.findOne(
-                { empCode },
-                { projection }
-              );
-          
-          if (!employee) {
-            throw new NotFoundError(`Employee ${empCode}`);
-          }
-          
-          return { employee };
-        },
-        CACHE_TTL.EMPLOYEE_SINGLE
+      // Use native driver for single employee (production-safe)
+      const employee = await col.findOne(
+        { empCode },
+        { projection }
       );
       
-      return NextResponse.json(result);
+      if (!employee) {
+        throw new NotFoundError(`Employee ${empCode}`);
+      }
+      
+      return NextResponse.json({ employee });
     }
 
     // Otherwise → return list with pagination (used by admin/HR UI)
@@ -87,8 +87,13 @@ export async function GET(req) {
     const fetchEmployees = async () => {
       const skip = (page - 1) * limit;
       
-      // Get native MongoDB collection directly - NO MONGOOSE INVOLVEMENT
-      const col = Employee.collection;
+      // Get native MongoDB collection directly - BYPASS MONGOOSE MODEL ENTIRELY
+      // Use mongoose.connection.db to get raw collection - most reliable approach
+      const db = mongoose.connection.db;
+      if (!db) {
+        throw new Error('Database not connected');
+      }
+      const col = db.collection('employees'); // Use collection name directly
       
       // Ensure filter is a valid object (empty object is valid for "find all")
       const queryFilter = filter && Object.keys(filter).length > 0 ? filter : {};
