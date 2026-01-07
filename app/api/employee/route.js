@@ -116,12 +116,12 @@ export async function GET(req) {
               const startTime = Date.now();
               
               // Execute query immediately - don't store the query object
+              // CRITICAL: .lean() returns a promise that executes - don't use .exec() with .lean()
               const result = await Employee.find({}, minimalProjection)
                 .sort({ empCode: 1 }) // This should use empCode_1 index
                 .limit(limit)
                 .lean()
-                .maxTimeMS(20000)
-                .exec(); // Explicitly call exec() to ensure single execution
+                .maxTimeMS(20000);
               
               const queryTime = Date.now() - startTime;
               if (process.env.NODE_ENV === 'development' && queryTime > 5000) {
@@ -143,14 +143,13 @@ export async function GET(req) {
           [employees, total] = await Promise.all([
             monitorQuery(
               async () => {
-                // Execute query immediately with explicit exec() to avoid double execution
+                // Execute query immediately - .lean() returns a promise that executes once
                 return await Employee.find({}, listProjection)
                   .sort({ empCode: 1 })
                   .skip(skip)
                   .limit(limit)
                   .lean()
-                  .maxTimeMS(5000)
-                  .exec();
+                  .maxTimeMS(5000);
               },
               `Employee find query (no filters, page ${page})`
             ),
@@ -170,14 +169,13 @@ export async function GET(req) {
           monitorQuery(
             async () => {
               // Build and execute query in one chain - don't store query object
-              // This prevents "already executed" errors
+              // .lean() returns a promise that executes once - don't use .exec() with .lean()
               return await Employee.find(filter, listProjection)
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limit)
                 .lean()
-                .maxTimeMS(3000)
-                .exec(); // Explicit exec() ensures single execution
+                .maxTimeMS(3000);
             },
             'Employee find query (with filters)'
           ),

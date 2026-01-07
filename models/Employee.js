@@ -83,28 +83,6 @@ const Employee = mongoose.models.Employee || mongoose.model('Employee', Employee
 // NOTE: Index creation is now handled by ensureAllIndexes() in lib/db/ensureIndexes.js
 // which is called after mongoose.connect() in lib/db.js
 // This prevents "Cannot call createIndex() before initial connection" errors
-// Only create indexes here if connection is already established (for backward compatibility)
-if (typeof window === 'undefined') {
-  // Check if connection is ready before creating indexes
-  // This prevents the error when bufferCommands = false
-  const checkAndCreateIndexes = () => {
-    if (mongoose.connection.readyState === 1) {
-      // Connection is ready, safe to create indexes
-      Employee.createIndexes().catch((err) => {
-        // Ignore errors - indexes might already exist or will be created by ensureAllIndexes
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Employee index creation warning (may already exist):', err.message);
-        }
-      });
-    } else {
-      // Connection not ready yet, wait a bit and try again
-      setTimeout(checkAndCreateIndexes, 100);
-    }
-  };
-  
-  // Only try to create indexes if we're in a server environment
-  // The ensureAllIndexes() function will handle it properly after connection
-  // This is just a fallback for backward compatibility
-}
+// We don't create indexes here anymore - it's handled by ensureAllIndexes() after connection
 
 export default Employee;
