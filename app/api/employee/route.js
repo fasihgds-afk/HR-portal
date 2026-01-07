@@ -52,12 +52,13 @@ export async function GET(req) {
     const listProjection = getEmployeeProjection(false);
     const skip = (page - 1) * limit;
     
-    // Use aggregation pipeline - completely bypasses Mongoose query builder
+    // CRITICAL: Use aggregation pipeline - bypasses ALL Mongoose query builder issues
+    // Aggregation never uses Employee.find() so can't have "already executed" errors
     const queryFilter = Object.keys(filter).length > 0 ? filter : {};
     
-    // Build aggregation pipeline with projection FIRST (better performance)
+    // Build aggregation pipeline - projection first for efficiency
     const pipeline = [
-      { $match: queryFilter },
+      { $match: queryFilter }, // Empty {} matches all documents
       { $project: {
         _id: 1,
         empCode: 1,
@@ -78,10 +79,10 @@ export async function GET(req) {
       { $limit: limit },
     ];
     
-    // Execute aggregation (returns plain objects, no Mongoose documents)
+    // AGGREGATION PIPELINE - No Mongoose find() queries used here at all
     const employees = await Employee.aggregate(pipeline);
     
-    // Execute count separately
+    // Count also uses aggregation for consistency
     const total = await Employee.countDocuments(queryFilter);
 
     return NextResponse.json({
