@@ -163,7 +163,7 @@ export async function GET(req) {
             'Employee count query'
           ),
           monitorQuery(
-            () => {
+            async () => {
               let query = Employee.find(filter, listProjection)
                 .sort(sortOptions)
                 .skip(skip)
@@ -171,16 +171,12 @@ export async function GET(req) {
                 .lean()
                 .maxTimeMS(3000);
               
-              // Hint index based on filter
-              if (filter.shift) {
-                query = query.hint({ shift: 1 });
-              } else if (filter.department) {
-                query = query.hint({ department: 1 });
-              } else if (filter.empCode) {
-                query = query.hint({ empCode: 1 });
-              }
+              // Hint index based on filter (but don't use hint if it causes issues)
+              // MongoDB will automatically choose the best index
+              // Only hint if absolutely necessary and you know the index exists
               
-              return query;
+              // Execute the query and return the result
+              return await query;
             },
             'Employee find query (with filters)'
           ),
