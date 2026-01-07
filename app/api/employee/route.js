@@ -112,11 +112,11 @@ export async function GET(req) {
         cursor = cursor.limit(limit);
         
         // Execute queries using native driver - NO MONGOOSE INVOLVEMENT
+        // Always use countDocuments() with filter (even if empty) - more reliable than estimatedDocumentCount()
+        // Empty filter {} is valid and will count all documents
         const [employees, total] = await Promise.all([
           cursor.toArray(),
-          hasFilters
-            ? col.countDocuments(queryFilter)
-            : col.estimatedDocumentCount(),
+          col.countDocuments(queryFilter), // Use countDocuments always - works with empty filter {}
         ]);
 
         return {
