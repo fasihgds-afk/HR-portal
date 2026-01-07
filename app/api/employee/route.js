@@ -35,8 +35,8 @@ export async function GET(req) {
           const result = await getOrSetCache(
             cacheKey,
             async () => {
-              const doc = await Employee.findOne({ empCode }, projection).exec();
-              const employee = doc ? (doc.toObject ? doc.toObject() : doc) : null;
+              // Use .lean() for single employee - returns plain object directly
+              const employee = await Employee.findOne({ empCode }, projection).lean();
           
           if (!employee) {
             throw new NotFoundError(`Employee ${empCode}`);
@@ -112,19 +112,15 @@ export async function GET(req) {
                 // Exclude: phoneNumber, cnic, saturdayGroup (not needed for list view)
               };
               
-              // CRITICAL FIX: Use .exec() explicitly and convert to plain objects
+              // CRITICAL FIX: Use .lean() directly - returns plain objects
               // This prevents the "already executed" error in production
+              // .lean() executes the query and returns plain JS objects
               const startTime = Date.now();
-              
-              // Build query and execute with .exec() - then convert to plain objects
-              const query = Employee.find({}, minimalProjection)
+              const result = await Employee.find({}, minimalProjection)
                 .sort({ empCode: 1 }) // This should use empCode_1 index
                 .limit(limit)
-                .maxTimeMS(20000);
-              
-              // Execute query and convert to plain objects
-              const docs = await query.exec();
-              const result = docs.map(doc => doc.toObject ? doc.toObject() : doc);
+                .maxTimeMS(20000)
+                .lean(); // .lean() returns plain objects directly - no conversion needed
               
               const queryTime = Date.now() - startTime;
               if (process.env.NODE_ENV === 'development' && queryTime > 5000) {
@@ -146,14 +142,13 @@ export async function GET(req) {
           [employees, total] = await Promise.all([
             monitorQuery(
               async () => {
-                // Execute query with .exec() and convert to plain objects
-                const docs = await Employee.find({}, listProjection)
+                // Use .lean() for plain objects - execute in one chain
+                return await Employee.find({}, listProjection)
                   .sort({ empCode: 1 })
                   .skip(skip)
                   .limit(limit)
                   .maxTimeMS(5000)
-                  .exec();
-                return docs.map(doc => doc.toObject ? doc.toObject() : doc);
+                  .lean();
               },
               `Employee find query (no filters, page ${page})`
             ),
@@ -172,14 +167,13 @@ export async function GET(req) {
           ),
           monitorQuery(
             async () => {
-              // Build and execute query with .exec() and convert to plain objects
-              const docs = await Employee.find(filter, listProjection)
+              // Use .lean() for plain objects - execute in one chain
+              return await Employee.find(filter, listProjection)
                 .sort(sortOptions)
                 .skip(skip)
                 .limit(limit)
                 .maxTimeMS(3000)
-                .exec();
-              return docs.map(doc => doc.toObject ? doc.toObject() : doc);
+                .lean();
             },
             'Employee find query (with filters)'
           ),
@@ -269,12 +263,12 @@ export async function POST(req) {
       update.monthlySalary = Number(update.monthlySalary);
     }
 
-    const doc = await Employee.findOneAndUpdate(
+    // Use .lean() for update - returns plain object directly
+    const employee = await Employee.findOneAndUpdate(
       { empCode },
       { $set: update },
       { new: true, upsert: true, setDefaultsOnInsert: true }
-    ).exec();
-    const employee = doc ? (doc.toObject ? doc.toObject() : doc) : null;
+    ).lean();
 
     // Invalidate employee caches after update
     invalidateEmployeeCache();
