@@ -11,15 +11,33 @@ export const dynamic = 'force-dynamic';
 // - /api/employee                  -> list { items: [...] }
 export async function GET(req) {
   try {
+    // Log request for debugging (only in production to help diagnose)
+    if (process.env.NODE_ENV === 'production') {
+      console.log('[Employee API] GET request received:', {
+        url: req.url,
+        hasMongoUri: !!process.env.MONGO_URI,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     // Connect to database
     try {
       await connectDB();
+      if (process.env.NODE_ENV === 'production') {
+        console.log('[Employee API] Database connected successfully');
+      }
     } catch (dbError) {
-      console.error('Database connection error:', dbError);
+      console.error('[Employee API] Database connection error:', dbError);
+      console.error('[Employee API] Error details:', {
+        message: dbError.message,
+        name: dbError.name,
+        hasMongoUri: !!process.env.MONGO_URI,
+      });
       return NextResponse.json(
         {
-          error: 'Database connection failed. Please check MONGO_URI environment variable.',
-          details: process.env.NODE_ENV === 'development' ? dbError.message : undefined,
+          error: 'Database connection failed. Please check MONGO_URI environment variable in Vercel.',
+          details: process.env.NODE_ENV === 'development' ? dbError.message : 'Check Vercel Function Logs for details',
+          hasMongoUri: !!process.env.MONGO_URI,
         },
         { status: 500 }
       );
@@ -70,6 +88,17 @@ export async function GET(req) {
       .skip(skip)
       .limit(limit)
       .lean();
+
+    // Log result for debugging
+    if (process.env.NODE_ENV === 'production') {
+      console.log('[Employee API] Query result:', {
+        employeesCount: employees?.length || 0,
+        total,
+        page,
+        limit,
+        filter: Object.keys(filter).length > 0 ? 'has filters' : 'no filters',
+      });
+    }
 
     // Always return items array, even if empty
     return NextResponse.json({
