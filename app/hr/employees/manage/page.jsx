@@ -250,10 +250,15 @@ export default function EmployeeShiftPage() {
       const data = await res.json();
 
       // Update local state immediately for instant feedback
+      // IMPORTANT: Use the returned employee data which has the updated shift
       setEmployees((prev) =>
-        prev.map((e) =>
-          e.empCode === data.employee.empCode ? data.employee : e
-        )
+        prev.map((e) => {
+          if (e.empCode === data.employee.empCode) {
+            // Merge the returned employee data to ensure shift is updated
+            return { ...e, ...data.employee };
+          }
+          return e;
+        })
       );
 
       showToast(

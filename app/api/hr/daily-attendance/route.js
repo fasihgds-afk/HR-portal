@@ -4,7 +4,8 @@ import { connectDB } from '../../../../lib/db';
 import AttendanceEvent from '../../../../models/AttendanceEvent';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
-import EmployeeShiftHistory from '../../../../models/EmployeeShiftHistory';
+// EmployeeShiftHistory removed - using employee's current shift from Employee model directly
+// This ensures shift updates from employee manage page are immediately reflected
 import Shift from '../../../../models/Shift';
 // Cache removed for simplicity and real-time data
 
@@ -128,38 +129,74 @@ export async function POST(req) {
       ShiftAttendance.find({ date: nextDateStr }).lean(),
     ]);
 
-    // Pre-fetch shift history for all employees for this date
-    const empCodes = allEmployees.map((e) => e.empCode);
-    const shiftHistoryForDate = await EmployeeShiftHistory.find({
-      empCode: { $in: empCodes },
-      effectiveDate: { $lte: date },
-      $or: [{ endDate: null }, { endDate: { $gte: date } }],
-    })
-      .sort({ effectiveDate: -1 })
-      .lean();
-
-    // Build map: empCode -> shiftCode (from history)
-    const shiftMap = new Map();
-    for (const history of shiftHistoryForDate) {
-      if (!shiftMap.has(history.empCode)) {
-        shiftMap.set(history.empCode, history.shiftCode);
+    // Build shift code to shift object map for quick lookup
+    const shiftByCode = new Map();
+    // Also build shiftId (ObjectId) to shift code map for handling ObjectId values
+    const shiftById = new Map();
+    for (const shift of allShifts) {
+      shiftByCode.set(shift.code, shift);
+      // Map both _id (ObjectId) and string representation to shift code
+      if (shift._id) {
+        shiftById.set(shift._id.toString(), shift.code);
+        shiftById.set(String(shift._id), shift.code);
       }
     }
 
-    // Build shift code to shift object map for quick lookup
-    const shiftByCode = new Map();
-    for (const shift of allShifts) {
-      shiftByCode.set(shift.code, shift);
+    // Helper function to extract shift code from various formats
+    // This function handles multiple shift format patterns including ObjectIds
+    function extractShiftCode(shiftValue) {
+      if (!shiftValue) return '';
+      
+      // Handle ObjectId (MongoDB ObjectId string format: 24 hex characters)
+      // Check if it looks like an ObjectId (24 hex characters)
+      const stringValue = String(shiftValue).trim();
+      if (!stringValue) return '';
+      
+      // Pattern: ObjectId (24 hex characters, e.g., "6941d6a487d79351691fea63")
+      if (/^[0-9a-fA-F]{24}$/.test(stringValue)) {
+        // Look up the shift code from the ObjectId map
+        const shiftCode = shiftById.get(stringValue);
+        if (shiftCode) {
+          return shiftCode;
+        }
+        // If not found in map, return empty (ObjectId doesn't match any shift)
+        return '';
+      }
+      
+      // Try multiple patterns to extract shift code
+      // Pattern 1: Direct code like "D1", "N1", "D2", etc.
+      const directMatch = stringValue.match(/^([A-Z]\d+)$/i);
+      if (directMatch) {
+        return directMatch[1].toUpperCase(); // Normalize to uppercase
+      }
+      
+      // Pattern 2: Formatted string like "D1 – Day Shift (09:00–18:00)" or "D1 - Day Shift"
+      const formattedMatch = stringValue.match(/^([A-Z]\d+)/i);
+      if (formattedMatch) {
+        return formattedMatch[1].toUpperCase(); // Normalize to uppercase
+      }
+      
+      // Pattern 3: Already uppercase code
+      if (/^[A-Z]\d+$/.test(stringValue)) {
+        return stringValue;
+      }
+      
+      // If no pattern matches, return as-is (might be a valid code we don't recognize)
+      return stringValue.toUpperCase();
     }
 
     // Map for quick lookup: empCode -> info
+    // IMPORTANT: Use employee's current shift from Employee model (not EmployeeShiftHistory)
+    // This ensures shift updates from employee manage page are immediately reflected
     const empInfoMap = new Map();
     for (const emp of allEmployees) {
-      // Use dynamic shift from history if available, otherwise fallback to employee's shift
-      const dynamicShift = shiftMap.get(emp.empCode) || emp.shift || '';
+      // Use employee's current shift directly (same as monthly attendance route)
+      // Extract shift code from various possible formats
+      const employeeShift = extractShiftCode(emp.shift);
+      
       empInfoMap.set(emp.empCode, {
         name: emp.name || '',
-        shift: dynamicShift,
+        shift: employeeShift,
         department: emp.department || '',
         designation: emp.designation || '',
       });
@@ -225,7 +262,8 @@ export async function POST(req) {
     // Get all night shift employee codes (those with crossesMidnight shifts)
     const nightShiftEmpCodes = new Set();
     for (const emp of allEmployees) {
-      const empAssignedShift = shiftMap.get(emp.empCode) || emp.shift || '';
+      // Use employee's current shift from Employee model (not from history)
+      const empAssignedShift = extractShiftCode(emp.shift);
       const shiftObj = shiftByCode.get(empAssignedShift);
       if (shiftObj?.crossesMidnight === true) {
         nightShiftEmpCodes.add(emp.empCode);
@@ -316,7 +354,8 @@ export async function POST(req) {
       let checkOut = null;
       
       // Get employee's assigned shift to determine if it's a night shift
-      const empAssignedShift = rec?.assignedShift || emp.shift || '';
+      // Use employee's current shift from Employee model (not from history)
+      const empAssignedShift = extractShiftCode(rec?.assignedShift || emp.shift || '');
       const shiftObjForCheckOut = shiftByCode.get(empAssignedShift);
       const isNightShiftForCheckOut = shiftObjForCheckOut?.crossesMidnight === true;
       
@@ -628,17 +667,44 @@ export async function POST(req) {
       }
 
       // Final shift decision:
-      // 1) Prefer employee's assigned shift (from history or Employee.shift)
+      // 1) Prefer employee's current shift from Employee model (updated from manage page)
       // 2) Otherwise infer from detected punch times
+      // 3) If employee has a shift assigned but it's not in active shifts, still use it (for display)
       let shift = 'Unknown';
-      const assignedShift = rec?.assignedShift || emp.shift || '';
-
-      // Check if assigned shift exists in database
-      if (assignedShift && shiftByCode.has(assignedShift)) {
+      
+      // Get employee's shift from Employee model (most reliable source)
+      const empShiftRaw = emp.shift || '';
+      let assignedShift = extractShiftCode(empShiftRaw);
+      
+      // If we couldn't extract from emp.shift, try from rec?.assignedShift (from empInfoMap)
+      if (!assignedShift && rec?.assignedShift) {
+        assignedShift = extractShiftCode(rec.assignedShift);
+      }
+      
+      // Priority 1: Use employee's assigned shift if it exists (even if not in active shifts)
+      // This ensures shifts show correctly even if a shift was deactivated
+      if (assignedShift) {
         shift = assignedShift;
-      } else if (rec?.detectedShifts && rec.detectedShifts.size > 0) {
-        // Use first detected shift (or could prioritize by most punches)
+      } 
+      // Priority 2: Use detected shift from punch times
+      else if (rec?.detectedShifts && rec.detectedShifts.size > 0) {
         shift = Array.from(rec.detectedShifts)[0];
+      }
+      
+      // Debug logging for employee 00002 to diagnose "Unknown" issue
+      if (emp.empCode === '00002') {
+        console.log(`[DAILY ATTENDANCE DEBUG] Employee 00002:`, {
+          empShiftRaw: empShiftRaw,
+          empShiftType: typeof empShiftRaw,
+          recAssignedShift: rec?.assignedShift,
+          extractedShift: assignedShift,
+          shiftByCodeHas: shiftByCode.has(assignedShift),
+          detectedShifts: rec?.detectedShifts ? Array.from(rec.detectedShifts) : [],
+          finalShift: shift,
+          allShiftCodes: Array.from(shiftByCode.keys()),
+          hasRec: !!rec,
+          empInfoMapShift: empInfoMap.get(emp.empCode)?.shift,
+        });
       }
 
       // Calculate total punches: count events found, but also count checkOut if it exists from existing record or next day's record
