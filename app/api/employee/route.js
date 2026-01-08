@@ -140,6 +140,40 @@ export async function POST(req) {
       update.monthlySalary = Number(update.monthlySalary);
     }
 
+    // Handle shift field: Convert ObjectId to shift code if needed
+    if (update.shift) {
+      const shiftValue = String(update.shift).trim();
+      
+      // Check if shift is an ObjectId (24 hex characters)
+      if (/^[0-9a-fA-F]{24}$/.test(shiftValue)) {
+        // Import Shift model to look up shift code
+        const Shift = (await import('../../../models/Shift')).default;
+        const shiftDoc = await Shift.findById(shiftValue).lean();
+        
+        if (shiftDoc && shiftDoc.code) {
+          // Replace ObjectId with shift code
+          update.shift = shiftDoc.code;
+          // Also update shiftId if it's different
+          update.shiftId = shiftDoc._id;
+        } else {
+          // ObjectId doesn't match any shift, clear it
+          console.warn(`[Employee API] Shift ObjectId ${shiftValue} not found, clearing shift for employee ${empCode}`);
+          update.shift = '';
+          update.shiftId = null;
+        }
+      } else {
+        // Shift is already a code (like 'D1', 'N1'), normalize to uppercase
+        update.shift = shiftValue.toUpperCase();
+        
+        // Try to find and set shiftId if shift code is provided
+        const Shift = (await import('../../../models/Shift')).default;
+        const shiftDoc = await Shift.findOne({ code: update.shift }).lean();
+        if (shiftDoc) {
+          update.shiftId = shiftDoc._id;
+        }
+      }
+    }
+
     // Execute update directly
     const employee = await Employee.findOneAndUpdate(
       { empCode },

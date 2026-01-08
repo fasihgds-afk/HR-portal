@@ -131,38 +131,58 @@ export async function POST(req) {
 
     // Build shift code to shift object map for quick lookup
     const shiftByCode = new Map();
+    // Also build shiftId (ObjectId) to shift code map for handling ObjectId values
+    const shiftById = new Map();
     for (const shift of allShifts) {
       shiftByCode.set(shift.code, shift);
+      // Map both _id (ObjectId) and string representation to shift code
+      if (shift._id) {
+        shiftById.set(shift._id.toString(), shift.code);
+        shiftById.set(String(shift._id), shift.code);
+      }
     }
 
     // Helper function to extract shift code from various formats
-    // This function handles multiple shift format patterns
+    // This function handles multiple shift format patterns including ObjectIds
     function extractShiftCode(shiftValue) {
-      if (!shiftValue || typeof shiftValue !== 'string') return '';
+      if (!shiftValue) return '';
       
-      const trimmed = shiftValue.trim();
-      if (!trimmed) return '';
+      // Handle ObjectId (MongoDB ObjectId string format: 24 hex characters)
+      // Check if it looks like an ObjectId (24 hex characters)
+      const stringValue = String(shiftValue).trim();
+      if (!stringValue) return '';
+      
+      // Pattern: ObjectId (24 hex characters, e.g., "6941d6a487d79351691fea63")
+      if (/^[0-9a-fA-F]{24}$/.test(stringValue)) {
+        // Look up the shift code from the ObjectId map
+        const shiftCode = shiftById.get(stringValue);
+        if (shiftCode) {
+          return shiftCode;
+        }
+        // If not found in map, return empty (ObjectId doesn't match any shift)
+        return '';
+      }
       
       // Try multiple patterns to extract shift code
       // Pattern 1: Direct code like "D1", "N1", "D2", etc.
-      const directMatch = trimmed.match(/^([A-Z]\d+)$/i);
+      const directMatch = stringValue.match(/^([A-Z]\d+)$/i);
       if (directMatch) {
         return directMatch[1].toUpperCase(); // Normalize to uppercase
       }
       
       // Pattern 2: Formatted string like "D1 – Day Shift (09:00–18:00)" or "D1 - Day Shift"
-      const formattedMatch = trimmed.match(/^([A-Z]\d+)/i);
+      const formattedMatch = stringValue.match(/^([A-Z]\d+)/i);
       if (formattedMatch) {
         return formattedMatch[1].toUpperCase(); // Normalize to uppercase
       }
       
       // Pattern 3: Already uppercase code
-      if (/^[A-Z]\d+$/.test(trimmed)) {
-        return trimmed;
+      if (/^[A-Z]\d+$/.test(stringValue)) {
+        return stringValue;
       }
       
       // If no pattern matches, return as-is (might be a valid code we don't recognize)
-      return trimmed.toUpperCase();
+      return stringValue.toUpperCase();
     }
 
     // Map for quick lookup: empCode -> info
