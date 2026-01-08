@@ -1,8 +1,8 @@
 // next-app/app/api/employee/route.js
 import { NextResponse } from 'next/server';
-import { connectDB } from '../../../lib/db';
-import Employee from '../../../models/Employee';
-import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/queryOptimizer';
+import { connectDB } from '@/lib/db';
+import Employee from '@/models/Employee';
+import { buildEmployeeFilter, getEmployeeProjection } from '@/lib/db/queryOptimizer';
 
 export const dynamic = 'force-dynamic';
 
