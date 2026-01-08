@@ -649,27 +649,41 @@ export async function POST(req) {
       // Final shift decision:
       // 1) Prefer employee's current shift from Employee model (updated from manage page)
       // 2) Otherwise infer from detected punch times
+      // 3) If employee has a shift assigned but it's not in active shifts, still use it (for display)
       let shift = 'Unknown';
-      let assignedShift = extractShiftCode(rec?.assignedShift || emp.shift || '');
-
-      // Check if assigned shift exists in database
-      if (assignedShift && shiftByCode.has(assignedShift)) {
+      
+      // Get employee's shift from Employee model (most reliable source)
+      const empShiftRaw = emp.shift || '';
+      let assignedShift = extractShiftCode(empShiftRaw);
+      
+      // If we couldn't extract from emp.shift, try from rec?.assignedShift (from empInfoMap)
+      if (!assignedShift && rec?.assignedShift) {
+        assignedShift = extractShiftCode(rec.assignedShift);
+      }
+      
+      // Priority 1: Use employee's assigned shift if it exists (even if not in active shifts)
+      // This ensures shifts show correctly even if a shift was deactivated
+      if (assignedShift) {
         shift = assignedShift;
-      } else if (rec?.detectedShifts && rec.detectedShifts.size > 0) {
-        // Use first detected shift (or could prioritize by most punches)
+      } 
+      // Priority 2: Use detected shift from punch times
+      else if (rec?.detectedShifts && rec.detectedShifts.size > 0) {
         shift = Array.from(rec.detectedShifts)[0];
       }
       
       // Debug logging for employee 00002 to diagnose "Unknown" issue
       if (emp.empCode === '00002') {
         console.log(`[DAILY ATTENDANCE DEBUG] Employee 00002:`, {
-          empShift: emp.shift,
+          empShiftRaw: empShiftRaw,
+          empShiftType: typeof empShiftRaw,
           recAssignedShift: rec?.assignedShift,
           extractedShift: assignedShift,
           shiftByCodeHas: shiftByCode.has(assignedShift),
           detectedShifts: rec?.detectedShifts ? Array.from(rec.detectedShifts) : [],
           finalShift: shift,
           allShiftCodes: Array.from(shiftByCode.keys()),
+          hasRec: !!rec,
+          empInfoMapShift: empInfoMap.get(emp.empCode)?.shift,
         });
       }
 
