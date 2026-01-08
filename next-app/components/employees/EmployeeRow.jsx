@@ -121,34 +121,58 @@ export default function EmployeeRow({
 
       {/* Shift Column */}
       <td style={tdStyle}>
-        <select
-          style={{
-            ...selectStyle,
-            minWidth: 180,
-          }}
-          value={employee.shift || ''}
-          onChange={(e) => handleShiftChange(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = '#3b82f6';
-            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = '#d1d5db';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        >
-          <option value="">Select Shift</option>
-          {shifts.length > 0 ? (
-            shifts.map((shift) => (
-              <option key={shift._id} value={shift.code}>
-                {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-              </option>
-            ))
-          ) : (
-            <option value="" disabled>No shifts available</option>
-          )}
-        </select>
+        {(() => {
+          // Normalize shift value for comparison (uppercase, trimmed)
+          const normalizedShift = employee.shift ? String(employee.shift).trim().toUpperCase() : '';
+          // Find matching shift code (case-insensitive)
+          const matchingShift = shifts.find(s => 
+            s.code.toUpperCase() === normalizedShift || 
+            s.code === normalizedShift ||
+            s.code === employee.shift
+          );
+          const selectedShiftCode = matchingShift ? matchingShift.code : (employee.shift || '');
+          
+          return (
+            <select
+              style={{
+                ...selectStyle,
+                minWidth: 180,
+              }}
+              value={selectedShiftCode}
+              onChange={(e) => handleShiftChange(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = '#3b82f6';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = '#d1d5db';
+                e.currentTarget.style.boxShadow = 'none';
+                // Auto-save on blur if shift changed
+                const newShift = e.target.value;
+                const currentShift = selectedShiftCode;
+                if (newShift !== currentShift) {
+                  // Pass updated employee with new shift value
+                  const updatedEmployee = { ...employee, shift: newShift };
+                  setTimeout(() => {
+                    onSave(updatedEmployee);
+                  }, 100);
+                }
+              }}
+            >
+              <option value="">Select Shift</option>
+              {shifts.length > 0 ? (
+                shifts.map((shift) => (
+                  <option key={shift._id} value={shift.code}>
+                    {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>No shifts available</option>
+              )}
+            </select>
+          );
+        })()}
         {employee.shift && (
           <div style={{ 
             fontSize: 11, 

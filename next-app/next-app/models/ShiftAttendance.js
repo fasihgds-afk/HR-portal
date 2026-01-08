@@ -33,15 +33,24 @@ const ShiftAttendanceSchema = new mongoose.Schema(
   }
 );
 
-// ✅ ADD THESE INDEXES FOR PERFORMANCE
-// For finding all records of a date quickly (cached path)
+// ✅ PERFORMANCE: Indexes for common query patterns
+// For finding all records of a date quickly
 ShiftAttendanceSchema.index({ date: 1 });
 
 // For upserting by (date + empCode + shift) in bulkWrite
-ShiftAttendanceSchema.index({ date: 1, empCode: 1, shift: 1 });
+ShiftAttendanceSchema.index({ date: 1, empCode: 1, shift: 1 }, { unique: false });
 
 // For monthly attendance queries (date range + empCode)
 ShiftAttendanceSchema.index({ date: 1, empCode: 1 });
+
+// Index for empCode queries (for employee-specific lookups) - descending date for recent first
+ShiftAttendanceSchema.index({ empCode: 1, date: -1 });
+
+// Index for status filtering (common in reports)
+ShiftAttendanceSchema.index({ date: 1, attendanceStatus: 1 });
+
+// Index for late/early leave queries
+ShiftAttendanceSchema.index({ date: 1, late: 1, earlyLeave: 1 });
 
 
 

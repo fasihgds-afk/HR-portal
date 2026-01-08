@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '../../../lib/db';
 import Employee from '../../../models/Employee';
+import { generateCacheKey, getOrSetCache, invalidateEmployeeCache, CACHE_TTL } from '../../../lib/cache/cacheHelper';
+import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/queryOptimizer';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,42 +17,96 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const empCode = searchParams.get('empCode');
 
-    // common projection so we always include image fields
-    const projection = {
-      empCode: 1,
-      name: 1,
-      email: 1,
-      monthlySalary: 1,
-      shift: 1,
-      department: 1,
-      designation: 1,
-      phoneNumber: 1,
-      cnic: 1,
-      profileImageBase64: 1,
-      profileImageUrl: 1,
-      _id: 0,
-    };
+    // Use optimized projection (includes images for single employee, excludes base64 for lists)
+    const projection = getEmployeeProjection(true); // Include images
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
-      const employee = await Employee.findOne({ empCode }, projection).lean();
-
-      if (!employee) {
+      const cacheKey = generateCacheKey(`employee:${empCode}`, searchParams);
+      
+      const result = await getOrSetCache(
+        cacheKey,
+        async () => {
+          const employee = await Employee.findOne({ empCode }, projection).lean();
+          
+          if (!employee) {
+            return { error: `Employee ${empCode} not found`, status: 404 };
+          }
+          
+          return { employee };
+        },
+        CACHE_TTL.EMPLOYEE_SINGLE
+      );
+      
+      if (result.error) {
         return NextResponse.json(
-          { error: `Employee ${empCode} not found` },
-          { status: 404 }
+          { error: result.error },
+          { status: result.status }
         );
       }
-
-      return NextResponse.json({ employee });
+      
+      return NextResponse.json(result);
     }
 
-    // Otherwise → return full list (used by admin/HR UI)
-    const employees = await Employee.find({}, projection)
-      .sort({ empCode: 1 })
-      .lean();
+    // Otherwise → return list with pagination (used by admin/HR UI)
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const search = searchParams.get('search') || '';
+    const shift = searchParams.get('shift') || '';
+    const department = searchParams.get('department') || '';
 
-    return NextResponse.json({ items: employees });
+    // Build optimized query filter
+    const filter = buildEmployeeFilter({ search, shift, department });
+    
+    // Use optimized projection (exclude base64 images for list views)
+    const listProjection = getEmployeeProjection(false);
+
+    // Check if client wants to bypass cache (for real-time updates)
+    const bypassCache = searchParams.get('_t') || searchParams.get('no-cache');
+    
+    // Fetch function
+    const fetchEmployees = async () => {
+      // Calculate pagination
+      const skip = (page - 1) * limit;
+      
+      // Get total count for pagination
+      const total = await Employee.countDocuments(filter);
+      
+      // Get paginated employees with optimized projection
+      const employees = await Employee.find(filter, listProjection)
+        .sort({ empCode: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      return {
+        items: employees,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    };
+
+    // If bypassing cache, fetch directly
+    if (bypassCache) {
+      const result = await fetchEmployees();
+      return NextResponse.json(result);
+    }
+
+    // Otherwise, use cache for better performance
+    const cacheKey = generateCacheKey('employees', searchParams);
+    
+    // Get from cache or fetch from database
+    const result = await getOrSetCache(
+      cacheKey,
+      fetchEmployees,
+      CACHE_TTL.EMPLOYEES
+    );
+
+    return NextResponse.json(result);
   } catch (err) {
     console.error('GET /api/employee error:', err);
     return NextResponse.json(
@@ -123,9 +179,54 @@ export async function POST(req) {
       { new: true, upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
+    // Invalidate employee caches after update
+    invalidateEmployeeCache();
+
     return NextResponse.json({ employee });
   } catch (err) {
     console.error('POST /api/employee error:', err);
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/employee?empCode=XXXXX
+export async function DELETE(req) {
+  try {
+    await connectDB();
+
+    const { searchParams } = new URL(req.url);
+    const empCode = searchParams.get('empCode');
+
+    if (!empCode) {
+      return NextResponse.json(
+        { error: 'empCode is required' },
+        { status: 400 }
+      );
+    }
+
+    // Find and delete the employee
+    const deleted = await Employee.findOneAndDelete({ empCode });
+
+    if (!deleted) {
+      return NextResponse.json(
+        { error: `Employee ${empCode} not found` },
+        { status: 404 }
+      );
+    }
+
+    // Invalidate all employee caches after deletion
+    invalidateEmployeeCache();
+
+    return NextResponse.json({
+      success: true,
+      message: `Employee ${empCode} deleted successfully`,
+      employee: deleted,
+    });
+  } catch (err) {
+    console.error('DELETE /api/employee error:', err);
     return NextResponse.json(
       { error: err.message || 'Internal server error' },
       { status: 500 }

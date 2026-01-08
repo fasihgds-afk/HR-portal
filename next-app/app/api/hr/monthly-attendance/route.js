@@ -35,7 +35,7 @@ import ViolationRules from '../../../../models/ViolationRules';
 import { normalizeStatus, extractShiftCode } from '../../../../lib/calculations';
 import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts, getLeaveDeductionDays, getMissingPunchDeductionDays } from '../../../../lib/calculations';
 import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
-import { generateCacheKey, getOrSetCache, invalidateCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
+// Cache removed for simplicity and real-time data
 // EmployeeShiftHistory removed - using only employee's current shift assignment
 
 export const dynamic = 'force-dynamic';
@@ -409,49 +409,36 @@ export async function GET(req) {
     else if (monthIndex > companyToday.monthIndex) monthRelation = 1;
     else monthRelation = 0;
 
-    // Generate cache key based on month
-    const cacheKey = generateCacheKey('monthly-attendance', searchParams);
-    
-    // Get from cache or fetch from database
-    const result = await getOrSetCache(
-      cacheKey,
-      async () => {
-        await connectDB();
+    // Direct database queries - no caching for real-time data
+    await connectDB();
 
-        // Fetch active violation rules from database (with caching)
-        const violationRules = await getOrSetCache(
-          'active-violation-rules',
-          async () => {
-            const rules = await ViolationRules.findOne({ isActive: true }).lean();
-            if (!rules) {
-              // Return default rules if none exist
-              return {
-                violationConfig: {
-                  freeViolations: 2,
-                  milestoneInterval: 3,
-                  perMinuteRate: 0.007,
-                  maxPerMinuteFine: 1.0,
-                },
-                absentConfig: {
-                  bothMissingDays: 1.0,
-                  partialPunchDays: 1.0,
-                  leaveWithoutInformDays: 1.5,
-                },
-                leaveConfig: {
-                  unpaidLeaveDays: 1.0,
-                  sickLeaveDays: 1.0,
-                  halfDayDays: 0.5,
-                  paidLeaveDays: 0.0,
-                },
-                salaryConfig: {
-                  daysPerMonth: 30,
-                },
-              };
-            }
-            return rules;
-          },
-          CACHE_TTL.SHIFTS || 600 // Cache for 10 minutes
-        );
+    // Fetch active violation rules from database (direct query)
+    let violationRules = await ViolationRules.findOne({ isActive: true }).lean();
+    if (!violationRules) {
+      // Return default rules if none exist
+      violationRules = {
+        violationConfig: {
+          freeViolations: 2,
+          milestoneInterval: 3,
+          perMinuteRate: 0.007,
+          maxPerMinuteFine: 1.0,
+        },
+        absentConfig: {
+          bothMissingDays: 1.0,
+          partialPunchDays: 1.0,
+          leaveWithoutInformDays: 1.5,
+        },
+        leaveConfig: {
+          unpaidLeaveDays: 1.0,
+          sickLeaveDays: 1.0,
+          halfDayDays: 0.5,
+          paidLeaveDays: 0.0,
+        },
+        salaryConfig: {
+          daysPerMonth: 30,
+        },
+      };
+    }
 
         // Check if Shift collection has any documents (to avoid unnecessary queries)
         const shiftCount = await Shift.countDocuments({ isActive: true });
@@ -480,17 +467,11 @@ export async function GET(req) {
       docsByEmpDate.set(`${doc.empCode}|${doc.date}`, doc);
     }
 
-    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts and cache them
+    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts (direct query)
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
-      // Cache shifts for 10 minutes (they rarely change)
-      const allShifts = await getOrSetCache(
-        'active-shifts',
-        async () => {
-          return await Shift.find({ isActive: true }).lean();
-        },
-        CACHE_TTL.SHIFTS || 600
-      );
+      // Direct query - no caching
+      const allShifts = await Shift.find({ isActive: true }).lean();
       
       allShifts.forEach((s) => {
         allShiftsMap.set(s._id.toString(), s);
@@ -1352,20 +1333,17 @@ export async function GET(req) {
       });
     });
 
-    // Return data for caching
-    return {
+    // Return data directly - no caching
+    const result = {
       month: monthPrefix,
       daysInMonth,
       employees: employeesOut,
     };
-      },
-      CACHE_TTL.MONTHLY_ATTENDANCE
-    );
 
-    // Add cache headers for better performance
+    // Direct response - no caching
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     });
   } catch (err) {
@@ -1580,22 +1558,7 @@ export async function POST(req) {
 
     // PERFORMANCE: Invalidate monthly attendance cache after update
     // Extract month from date (YYYY-MM-DD) to get YYYY-MM
-    const monthStr = date.substring(0, 7); // Extract YYYY-MM from YYYY-MM-DD
-    const searchParams = new URLSearchParams({ month: monthStr });
-    const cacheKeyToInvalidate = generateCacheKey('monthly-attendance', searchParams);
-    
-    // Invalidate the specific cache key
-    invalidateCache(cacheKeyToInvalidate);
-    
-    // Also invalidate all monthly-attendance caches for this month (in case of different query params)
-    invalidateCache('monthly-attendance');
-    
-    // Also invalidate daily attendance cache for this date (might be affected)
-    const dailySearchParams = new URLSearchParams({ date });
-    const dailyCacheKey = generateCacheKey('daily-attendance', dailySearchParams);
-    invalidateCache(dailyCacheKey);
-    invalidateCache('daily-attendance'); // Also invalidate all daily-attendance caches
-
+    // Cache removed - data is always fresh
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('POST /api/hr/monthly-attendance error:', err);

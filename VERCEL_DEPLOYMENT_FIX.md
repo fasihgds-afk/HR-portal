@@ -8,13 +8,14 @@ The git repository root is `next-app/`, and all correct files are in `next-app/a
 
 ## Solution - Check Vercel Settings
 
-### Step 1: Verify Vercel Root Directory (CRITICAL)
+### Step 1: Verify Vercel Root Directory
 1. Go to your Vercel Dashboard: https://vercel.com/dashboard
 2. Select your project
 3. Go to **Settings** → **General**
 4. Scroll to **Root Directory** section
-5. **CRITICAL**: Set Root Directory to `next-app` (if it's empty or wrong, change it to `next-app`)
-6. Click **Save**
+5. **CRITICAL**: Set Root Directory to `next-app` (not empty, not root)
+6. If it's currently empty or wrong, change it to `next-app`
+7. Click **Save**
 
 ### Step 2: Verify Build Settings
 In the same **Settings** → **General** page:

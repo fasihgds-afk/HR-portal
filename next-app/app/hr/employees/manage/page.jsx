@@ -48,8 +48,7 @@ export default function EmployeeShiftPage() {
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState(null);
-  const [selectedShift, setSelectedShift] = useState(''); // Filter by shift
-  const [searchQuery, setSearchQuery] = useState(''); // Search query
+  const [searchQuery, setSearchQuery] = useState(''); // Search query only
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -103,22 +102,30 @@ export default function EmployeeShiftPage() {
     setLoading(true);
 
     try {
-      // Build query parameters
+      // Build query parameters - only search, no filters
       const params = new URLSearchParams();
       params.set('page', currentPage.toString());
       params.set('limit', '50'); // 50 employees per page
       if (searchQuery) {
         params.set('search', searchQuery);
       }
-      if (selectedShift) {
-        params.set('shift', selectedShift);
-      }
+      
+      // Log request for debugging
+      console.log('🔍 Loading employees with params:', {
+        page: currentPage,
+        limit: 50,
+        search: searchQuery || '(none)',
+        url: `/api/employee?${params.toString()}`,
+      });
       
       // Add cache-busting parameter to bypass server-side cache
       if (forceRefresh) {
         params.set('_t', Date.now().toString()); // Server will bypass cache when this is present
       }
 
+      // Add version parameter to force fresh data (cache busting)
+      params.set('v', '2.0'); // Version 2.0 = no shift filter
+      
       const res = await fetch(`/api/employee?${params.toString()}`, {
         cache: 'no-store', // Always bypass browser cache
         headers: {
@@ -129,9 +136,50 @@ export default function EmployeeShiftPage() {
       
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `Failed to load employees (${res.status})`);
+        let errorMessage = text || `Failed to load employees (${res.status})`;
+        
+        // Try to parse JSON error if available
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.error || errorMessage;
+          if (errorData.details) {
+            console.error('API Error Details:', errorData.details);
+          }
+        } catch (e) {
+          // Not JSON, use text as is
+        }
+        
+        console.error('Employee API Error:', {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorMessage,
+          url: res.url,
+        });
+        
+        throw new Error(errorMessage);
       }
       const data = await res.json();
+      
+      // Log response for debugging
+      console.log('Employee API Response:', {
+        itemsCount: data.items?.length || 0,
+        total: data.pagination?.total || 0,
+        page: data.pagination?.page || 1,
+        hasItems: !!data.items,
+        debug: data.debug, // Will show filter info in production
+      });
+      
+      // Log if no employees found (for debugging)
+      if (!data.items || data.items.length === 0) {
+        console.warn('⚠️ No employees found in API response:', {
+          items: data.items,
+          pagination: data.pagination,
+          total: data.pagination?.total,
+          debug: data.debug,
+          url: res.url,
+        });
+      }
+      
       setEmployees(data.items || []);
       if (data.pagination) {
         setPagination(data.pagination);
@@ -148,11 +196,12 @@ export default function EmployeeShiftPage() {
     loadShifts();
   }, []);
 
-  // Reload employees when page, search, or shift filter changes
+  // Reload employees when page or search changes
   useEffect(() => {
-    loadEmployees();
+    // Force fresh load on mount to bypass any cached data
+    loadEmployees(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, searchQuery, selectedShift]);
+  }, [currentPage, searchQuery]);
 
   function handleShiftChange(index, newShift) {
     setEmployees((prev) => {
@@ -167,21 +216,29 @@ export default function EmployeeShiftPage() {
     try {
       setSavingId(emp._id || emp.empCode);
 
+      // Get the latest employee data from state to ensure we have the updated shift
+      const currentEmployee = employees.find(e => e.empCode === emp.empCode) || emp;
+
+      // Normalize shift code to uppercase (Shift model stores codes in uppercase)
+      const normalizedShift = currentEmployee.shift 
+        ? String(currentEmployee.shift).trim().toUpperCase() 
+        : '';
+
       const res = await fetch('/api/employee', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          empCode: emp.empCode,
-          name: emp.name,
-          email: emp.email,
-          monthlySalary: emp.monthlySalary,
-          shift: emp.shift || '',
-          department: emp.department,
-          designation: emp.designation,
-          phoneNumber: emp.phoneNumber,
-          cnic: emp.cnic,
-          profileImageBase64: emp.profileImageBase64,
-          profileImageUrl: emp.profileImageUrl,
+          empCode: currentEmployee.empCode,
+          name: currentEmployee.name,
+          email: currentEmployee.email,
+          monthlySalary: currentEmployee.monthlySalary,
+          shift: normalizedShift,
+          department: currentEmployee.department,
+          designation: currentEmployee.designation,
+          phoneNumber: currentEmployee.phoneNumber,
+          cnic: currentEmployee.cnic,
+          profileImageBase64: currentEmployee.profileImageBase64,
+          profileImageUrl: currentEmployee.profileImageUrl,
         }),
       });
 
@@ -668,14 +725,8 @@ export default function EmployeeShiftPage() {
               </div>
               <EmployeeFilters
                 searchQuery={searchQuery}
-                selectedShift={selectedShift}
-                shifts={shifts}
                 onSearchChange={(value) => {
                   setSearchQuery(value);
-                  setCurrentPage(1);
-                }}
-                onShiftChange={(value) => {
-                  setSelectedShift(value);
                   setCurrentPage(1);
                 }}
               />

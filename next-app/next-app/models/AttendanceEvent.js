@@ -18,8 +18,15 @@ const AttendanceEventSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ ADD THIS (for fast range + empCode queries)
+// ✅ PERFORMANCE: Indexes for common query patterns
+// Composite index for range queries with empCode and minor filter
 AttendanceEventSchema.index({ eventTime: 1, minor: 1, empCode: 1 });
+
+// Index for single employee queries (empCode + eventTime range)
+AttendanceEventSchema.index({ empCode: 1, eventTime: 1 });
+
+// Index for eventTime range queries (for daily attendance)
+AttendanceEventSchema.index({ eventTime: 1, minor: 1 });
 
 export default mongoose.models.AttendanceEvent ||
   mongoose.model('AttendanceEvent', AttendanceEventSchema);

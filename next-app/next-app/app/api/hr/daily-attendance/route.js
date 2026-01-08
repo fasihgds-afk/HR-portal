@@ -6,6 +6,7 @@ import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import EmployeeShiftHistory from '../../../../models/EmployeeShiftHistory';
 import Shift from '../../../../models/Shift';
+import { getOrSetCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
 
 export const dynamic = 'force-dynamic'; // avoid caching in dev
 
@@ -101,8 +102,31 @@ export async function POST(req) {
       );
     }
 
-    // Load ALL employees (we want to show present + absent)
-    const allEmployees = await Employee.find().lean();
+    // Calculate next day date for night shift checkOut lookup
+    // Parse the date string (YYYY-MM-DD) and add 1 day
+    // Use simple date arithmetic to avoid timezone issues
+    const [year, month, day] = date.split('-').map(Number);
+    const currentDateObj = new Date(Date.UTC(year, month - 1, day));
+    const nextDateObj = new Date(currentDateObj);
+    nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
+    const nextDateStr = nextDateObj.getUTCFullYear() + '-' + 
+                       String(nextDateObj.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                       String(nextDateObj.getUTCDate()).padStart(2, '0');
+
+    // PERFORMANCE: Parallelize independent queries
+    const [allEmployees, existingRecords, nextDayRecords] = await Promise.all([
+      // Load ALL employees (we want to show present + absent)
+      // Use optimized projection - exclude large base64 images
+      Employee.find()
+        .select('empCode name shift department designation')
+        .lean(),
+      
+      // Load existing ShiftAttendance records for this date
+      ShiftAttendance.find({ date: date }).lean(),
+      
+      // Load existing ShiftAttendance records for next day (for night shift checkOut)
+      ShiftAttendance.find({ date: nextDateStr }).lean(),
+    ]);
 
     // Pre-fetch shift history for all employees for this date
     const empCodes = allEmployees.map((e) => e.empCode);
@@ -157,35 +181,9 @@ export async function POST(req) {
     // This matches the sync service's getBusinessRange() function
     const startLocal = new Date(`${date}T09:00:00${TZ}`);
     
-    // Calculate next day for end time (08:00 next day)
-    const nextDay = new Date(startLocal);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextDayStr = nextDay.getFullYear() + '-' + 
-                       pad(nextDay.getMonth() + 1) + '-' + 
-                       pad(nextDay.getDate());
-    const endLocal = new Date(`${nextDayStr}T08:00:00${TZ}`);
+    // Use nextDateStr (already calculated above) for end time
+    const endLocal = new Date(`${nextDateStr}T08:00:00${TZ}`);
 
-    // Load existing ShiftAttendance records for this date (to preserve saved checkOut times)
-    const existingRecords = await ShiftAttendance.find({
-      date: date,
-    }).lean();
-    
-    // Calculate next day date for night shift checkOut lookup
-    // Parse the date string (YYYY-MM-DD) and add 1 day
-    // Use simple date arithmetic to avoid timezone issues
-    const [year, month, day] = date.split('-').map(Number);
-    const currentDateObj = new Date(Date.UTC(year, month - 1, day));
-    const nextDateObj = new Date(currentDateObj);
-    nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
-    const nextDateStr = nextDateObj.getUTCFullYear() + '-' + 
-                        String(nextDateObj.getUTCMonth() + 1).padStart(2, '0') + '-' + 
-                        String(nextDateObj.getUTCDate()).padStart(2, '0');
-    
-    // Load existing ShiftAttendance records for next day (for night shift checkOut that occurs on next day)
-    const nextDayRecords = await ShiftAttendance.find({
-      date: nextDateStr,
-    }).lean();
-    
     // Build map: empCode -> next day record
     const nextDayByEmpCode = new Map();
     for (const record of nextDayRecords) {
@@ -218,6 +216,44 @@ export async function POST(req) {
     .lean();
 
     console.log(`📥 Found ${events.length} events in business day window for ${date}`);
+
+    // PERFORMANCE: Pre-fetch all next day events for night shift employees in a single batch query
+    // This eliminates N+1 query problem (previously querying per employee in loop)
+    const nextDayStartLocal = new Date(`${nextDateStr}T00:00:00${TZ}`);
+    const nextDayEndLocal = new Date(`${nextDateStr}T08:00:00${TZ}`);
+    
+    // Get all night shift employee codes (those with crossesMidnight shifts)
+    const nightShiftEmpCodes = new Set();
+    for (const emp of allEmployees) {
+      const empAssignedShift = shiftMap.get(emp.empCode) || emp.shift || '';
+      const shiftObj = shiftByCode.get(empAssignedShift);
+      if (shiftObj?.crossesMidnight === true) {
+        nightShiftEmpCodes.add(emp.empCode);
+      }
+    }
+    
+    // Batch query: fetch all next day events for all night shift employees at once
+    const allNextDayEvents = nightShiftEmpCodes.size > 0
+      ? await AttendanceEvent.find({
+          empCode: { $in: Array.from(nightShiftEmpCodes) },
+          eventTime: { $gte: nextDayStartLocal, $lte: nextDayEndLocal },
+          minor: 38, // "valid access" events only
+        })
+          .sort({ empCode: 1, eventTime: 1 })
+          .lean()
+      : [];
+    
+    // Build map: empCode -> array of next day events (sorted by time)
+    const nextDayEventsByEmp = new Map();
+    for (const event of allNextDayEvents) {
+      if (!event.empCode) continue;
+      if (!nextDayEventsByEmp.has(event.empCode)) {
+        nextDayEventsByEmp.set(event.empCode, []);
+      }
+      nextDayEventsByEmp.get(event.empCode).push(event);
+    }
+    
+    console.log(`🌙 Pre-fetched ${allNextDayEvents.length} next day events for ${nightShiftEmpCodes.size} night shift employees`);
 
     // Group punches by employee (only those who have events)
     const byEmp = new Map();
@@ -408,25 +444,9 @@ export async function POST(req) {
                 return `${year}-${month}-${day}`;
               };
               
-              // Query events from next day 00:00 to 08:00 (early morning checkOut belongs to previous night shift)
-              // Using 08:00 as cutoff covers all night shift end times (N1: 03:00, N2: 06:00, etc.)
-              const nextDayStartLocal = new Date(`${nextDateStr}T00:00:00${TZ}`);
-              const nextDayEndLocal = new Date(`${nextDateStr}T08:00:00${TZ}`);
-              
-              // Query events from next day 00:00 to 08:00
-              // We query the full range and validate later that checkout is after checkIn
-              // This ensures we capture all night shift checkouts (N1: 03:00, N2: 06:00, etc.)
-              const nextDayEvents = await AttendanceEvent.find({
-                empCode: emp.empCode,
-                eventTime: { 
-                  $gte: nextDayStartLocal,
-                  $lte: nextDayEndLocal 
-                },
-                minor: 38, // "valid access" events only
-              })
-              .sort({ eventTime: 1 }) // Sort by time ascending
-              .limit(10) // Get multiple events, we'll filter to find the one after checkIn
-              .lean();
+              // PERFORMANCE: Use pre-fetched next day events instead of querying per employee
+              // This eliminates N+1 query problem - we already fetched all next day events above
+              const nextDayEvents = nextDayEventsByEmp.get(emp.empCode) || [];
               
               // Get the first event on next day that is AFTER the checkIn time
               // CRITICAL: We must ensure the checkout belongs to the CURRENT business date's shift

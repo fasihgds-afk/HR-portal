@@ -80,12 +80,9 @@ EmployeeSchema.index({ shiftId: 1, department: 1 }, { background: true });
 // Ensure indexes are created when model is initialized
 const Employee = mongoose.models.Employee || mongoose.model('Employee', EmployeeSchema);
 
-// Create indexes if they don't exist (runs once on server startup)
-if (typeof window === 'undefined') {
-  // Only run on server side
-  Employee.createIndexes().catch((err) => {
-    console.warn('Employee index creation warning (may already exist):', err.message);
-  });
-}
+// NOTE: Index creation is now handled by ensureAllIndexes() in lib/db/ensureIndexes.js
+// which is called after mongoose.connect() in lib/db.js
+// This prevents "Cannot call createIndex() before initial connection" errors
+// We don't create indexes here anymore - it's handled by ensureAllIndexes() after connection
 
 export default Employee;

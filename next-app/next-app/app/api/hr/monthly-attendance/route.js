@@ -31,6 +31,11 @@ import { connectDB } from '../../../../lib/db';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Shift from '../../../../models/Shift';
+import ViolationRules from '../../../../models/ViolationRules';
+import { normalizeStatus, extractShiftCode } from '../../../../lib/calculations';
+import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts, getLeaveDeductionDays, getMissingPunchDeductionDays } from '../../../../lib/calculations';
+import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
+import { generateCacheKey, getOrSetCache, invalidateCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
 // EmployeeShiftHistory removed - using only employee's current shift assignment
 
 export const dynamic = 'force-dynamic';
@@ -80,7 +85,8 @@ function getCompanyTodayParts() {
 }
 
 // company-local date for a calendar day (YYYY-MM, day)
-function getCompanyLocalDateParts(year, monthIndex, day) {
+// PERFORMANCE: Memoized to avoid recalculating same date parts
+const _getCompanyLocalDatePartsOriginal = function(year, monthIndex, day) {
   // build 00:00 UTC, then shift to company local and read UTC* fields
   const baseUtc = Date.UTC(year, monthIndex, day, 0, 0, 0);
   const local = new Date(baseUtc + COMPANY_OFFSET_MS);
@@ -90,7 +96,11 @@ function getCompanyLocalDateParts(year, monthIndex, day) {
     day: local.getUTCDate(),
     dow: local.getUTCDay(), // 0–6 in company timezone
   };
-}
+};
+
+const getCompanyLocalDateParts = memoize(_getCompanyLocalDatePartsOriginal, (year, monthIndex, day) => {
+  return `${year}-${monthIndex}-${day}`;
+});
 
 // -----------------------------------------------------------------------------
 // SHIFT + LATE/EARLY RULES  (timezone-safe)
@@ -128,7 +138,8 @@ function parseTimeToMinutes(timeStr) {
 //  - late / earlyLeave flags (true/false)
 //  - lateMinutes / earlyMinutes = minutes BEYOND grace period
 // shift can be either a shift object (from DB) or a shift code string (legacy)
-function computeLateEarly(shift, checkIn, checkOut, allShiftsMap = null) {
+// PERFORMANCE: Memoized to avoid recalculating same shift/checkIn/checkOut combinations
+const _computeLateEarlyOriginal = function(shift, checkIn, checkOut, allShiftsMap = null) {
   if (!shift || !checkIn || !checkOut) {
     return { late: false, earlyLeave: false, lateMinutes: 0, earlyMinutes: 0 };
   }
@@ -273,7 +284,15 @@ function computeLateEarly(shift, checkIn, checkOut, allShiftsMap = null) {
   const earlyMinutes = earlyLeave ? earlyMinutesTotal - gracePeriod : 0;
 
   return { late, earlyLeave, lateMinutes, earlyMinutes };
-}
+};
+
+// Memoize computeLateEarly for performance (same shift/checkIn/checkOut = same result)
+const computeLateEarly = memoize(_computeLateEarlyOriginal, (shift, checkIn, checkOut) => {
+  const shiftKey = typeof shift === 'object' ? shift.code || shift._id : shift;
+  const checkInKey = checkIn instanceof Date ? checkIn.getTime() : checkIn;
+  const checkOutKey = checkOut instanceof Date ? checkOut.getTime() : checkOut;
+  return createCacheKey(shiftKey, checkInKey, checkOutKey);
+});
 
 // YYYY-MM-DD from a Date, using UTC fields so server timezone doesn't matter
 function toYMD(date) {
@@ -284,9 +303,10 @@ function toYMD(date) {
   return `${y}-${m}-${d}`;
 }
 
-// Extract shift code from potentially formatted strings
-// Handles cases like "– S2 (21:00–06:00)" -> "S2" or "D1" -> "D1"
-function extractShiftCode(shiftStr) {
+// REMOVED: Duplicate extractShiftCode function - now using imported from lib/calculations
+// This function is kept for reference but should not be used
+// Use: import { extractShiftCode } from '../../../../lib/calculations';
+function _extractShiftCode_DEPRECATED(shiftStr) {
   if (!shiftStr || typeof shiftStr !== 'string') return shiftStr || '';
   
   // Trim whitespace
@@ -312,7 +332,10 @@ function extractShiftCode(shiftStr) {
 // STATUS NORMALISATION
 // -----------------------------------------------------------------------------
 
-function normalizeStatus(rawStatus, { isWeekendOff } = {}) {
+// REMOVED: Duplicate normalizeStatus function - now using imported from lib/calculations
+// This function is kept for reference but should not be used
+// Use: import { normalizeStatus } from '../../../../lib/calculations';
+function _normalizeStatus_DEPRECATED(rawStatus, { isWeekendOff } = {}) {
   let s = (rawStatus || '').trim();
   if (!s) {
     if (isWeekendOff) return 'Holiday';
@@ -386,47 +409,70 @@ export async function GET(req) {
     else if (monthIndex > companyToday.monthIndex) monthRelation = 1;
     else monthRelation = 0;
 
-    await connectDB();
+    // Generate cache key based on month
+    const cacheKey = generateCacheKey('monthly-attendance', searchParams);
+    
+    // Get from cache or fetch from database
+    const result = await getOrSetCache(
+      cacheKey,
+      async () => {
+        await connectDB();
 
-    // Check if Shift collection has any documents (to avoid unnecessary queries)
-    const shiftCount = await Shift.countDocuments({ isActive: true });
-    const useDynamicShifts = shiftCount > 0;
+        // Fetch active violation rules from database (with caching)
+        const violationRules = await getOrSetCache(
+          'active-violation-rules',
+          async () => {
+            const rules = await ViolationRules.findOne({ isActive: true }).lean();
+            if (!rules) {
+              // Return default rules if none exist
+              return {
+                violationConfig: {
+                  freeViolations: 2,
+                  milestoneInterval: 3,
+                  perMinuteRate: 0.007,
+                  maxPerMinuteFine: 1.0,
+                },
+                absentConfig: {
+                  bothMissingDays: 1.0,
+                  partialPunchDays: 1.0,
+                  leaveWithoutInformDays: 1.5,
+                },
+                leaveConfig: {
+                  unpaidLeaveDays: 1.0,
+                  sickLeaveDays: 1.0,
+                  halfDayDays: 0.5,
+                  paidLeaveDays: 0.0,
+                },
+                salaryConfig: {
+                  daysPerMonth: 30,
+                },
+              };
+            }
+            return rules;
+          },
+          CACHE_TTL.SHIFTS || 600 // Cache for 10 minutes
+        );
 
-    const employees = await Employee.find(
-      {},
-      {
-        empCode: 1,
-        name: 1,
-        department: 1,
-        designation: 1,
-        shift: 1,
-        shiftId: 1,
-        monthlySalary: 1,
-        _id: 0,
-      }
-    ).lean();
+        // Check if Shift collection has any documents (to avoid unnecessary queries)
+        const shiftCount = await Shift.countDocuments({ isActive: true });
+        const useDynamicShifts = shiftCount > 0;
+
+        // Use optimized projection - only select needed fields
+        const employees = await Employee.find()
+          .select('empCode name department designation shift shiftId monthlySalary')
+          .lean();
 
     const monthStartDate = `${monthPrefix}-01`;
     const monthEndDate = `${monthPrefix}-${String(daysInMonth).padStart(2, '0')}`;
 
+    // Use optimized query with proper projection
     const shiftDocs = await ShiftAttendance.find(
       {
         date: { $gte: monthStartDate, $lte: monthEndDate },
-      },
-      {
-        date: 1,
-        empCode: 1,
-        checkIn: 1,
-        checkOut: 1,
-        shift: 1,
-        attendanceStatus: 1,
-        reason: 1,
-        excused: 1,
-        lateExcused: 1,
-        earlyExcused: 1,
-        _id: 0,
       }
-    ).lean();
+    )
+      .select('date empCode checkIn checkOut shift attendanceStatus reason excused lateExcused earlyExcused')
+      .lean();
 
     const docsByEmpDate = new Map();
     for (const doc of shiftDocs) {
@@ -434,10 +480,18 @@ export async function GET(req) {
       docsByEmpDate.set(`${doc.empCode}|${doc.date}`, doc);
     }
 
-    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts and shift history at once
+    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts and cache them
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
-      const allShifts = await Shift.find({ isActive: true }).lean();
+      // Cache shifts for 10 minutes (they rarely change)
+      const allShifts = await getOrSetCache(
+        'active-shifts',
+        async () => {
+          return await Shift.find({ isActive: true }).lean();
+        },
+        CACHE_TTL.SHIFTS || 600
+      );
+      
       allShifts.forEach((s) => {
         allShiftsMap.set(s._id.toString(), s);
         allShiftsMap.set(s.code, s); // Also index by code for quick lookup
@@ -445,6 +499,17 @@ export async function GET(req) {
     }
 
     // Shift history removed - using only employee's current shift assignment
+
+    // PERFORMANCE: Pre-calculate weekend flags for all days to avoid repeated calculations
+    const weekendFlags = new Map();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const { dow } = getCompanyLocalDateParts(year, monthIndex, day);
+      weekendFlags.set(day, {
+        dow,
+        isSunday: dow === 0,
+        isSaturday: dow === 6,
+      });
+    }
 
     const employeesOut = [];
 
@@ -498,12 +563,13 @@ export async function GET(req) {
           isFutureDay = true;
         }
 
-        // day-of-week in COMPANY timezone
-        const { dow } = getCompanyLocalDateParts(year, monthIndex, day);
-
+        // PERFORMANCE: Use pre-calculated weekend flags
+        const weekendInfo = weekendFlags.get(day);
+        const dow = weekendInfo.dow;
+        
         let isWeekendOff = false;
-        if (dow === 0) isWeekendOff = true; // Sunday
-        if (dow === 6) {
+        if (weekendInfo.isSunday) isWeekendOff = true; // Sunday
+        if (weekendInfo.isSaturday) {
           // alternate Saturdays off
           saturdayIndex++;
           if (saturdayIndex % 2 === 1) isWeekendOff = true;
@@ -971,69 +1037,53 @@ export async function GET(req) {
 
           // DETERMINE DEDUCTION TYPE BASED ON VIOLATION NUMBER:
           // ---------------------------------------------------
-          // Pattern check: Is this a "milestone" violation? (3rd, 6th, 9th, 12th, ...)
-          // These are multiples of 3: 3, 6, 9, 12, 15, 18, 21, ...
-          if (vNo % 3 === 0) {
-            // ✓ MILESTONE VIOLATION: Add 1 FULL DAY deduction
-            // This happens at violations: 3, 6, 9, 12, 15, 18, 21, ...
-            //
-            // Accumulation pattern:
-            //   vNo=3  → violationBaseDays = 1 (total: 1 day)
-            //   vNo=6  → violationBaseDays = 2 (total: 2 days)
-            //   vNo=9  → violationBaseDays = 3 (total: 3 days)
-            //   vNo=12 → violationBaseDays = 4 (total: 4 days)
-            violationBaseDays += 1;
-            
-            // Note: No per-minute fine for milestone violations (full day only)
-          } else if (vNo > 3) {
-            // ✓ REGULAR VIOLATION: Apply per-minute fine
-            // This happens at violations: 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, ...
-            // (All violations after 3rd that are NOT multiples of 3)
-            //
-            // PER-MINUTE FINE CALCULATION:
-            // ----------------------------
-            // Formula: fineForDay = violationMinutes × 0.007 days/minute
-            // Cap: Maximum 1 day per violation (prevents excessive fines)
-            //
-            // Example calculations:
-            //   - 10 minutes late → 10 × 0.007 = 0.07 days
-            //   - 30 minutes late → 30 × 0.007 = 0.21 days
-            //   - 60 minutes late → 60 × 0.007 = 0.42 days
-            //   - 143 minutes late → 143 × 0.007 = 1.001 → capped at 1.0 day
-            //   - 200 minutes late → 200 × 0.007 = 1.4 → capped at 1.0 day
-            const fineForThisDay = Math.min(dayViolationMinutes * 0.007, 1.0);
-            perMinuteFineDays += fineForThisDay;
-            
-            // DEBUG LOGGING: Flag suspiciously high fines for investigation
-            // (Fines at cap or extremely high violation minutes may indicate data issues)
-            if (fineForThisDay >= 1.0 || dayViolationMinutes > 200) {
-              console.log(`[DEBUG] High per-minute fine for ${emp.empCode} on ${date}:`, {
-                empCode: emp.empCode,
-                date,
-                violationDay: vNo,
-                dayViolationMinutes,
-                fineForThisDay,
-                late,
-                earlyLeave,
-                lateMinutes,
-                earlyMinutes,
-              });
+          // Use violation rules from database
+          const vConfig = violationRules.violationConfig;
+          
+          // Skip free violations (1st, 2nd, etc.) - no deduction for these
+          if (vNo > vConfig.freeViolations) {
+            // Pattern check: Is this a "milestone" violation? (3rd, 6th, 9th, 12th, ...)
+            // These are multiples of milestoneInterval
+            if (vNo % vConfig.milestoneInterval === 0) {
+              // ✓ MILESTONE VIOLATION: Add 1 FULL DAY deduction
+              violationBaseDays += 1;
+              
+              // Note: No per-minute fine for milestone violations (full day only)
+            } else {
+              // ✓ REGULAR VIOLATION: Apply per-minute fine
+              // PER-MINUTE FINE CALCULATION:
+              // ----------------------------
+              // Formula: fineForDay = violationMinutes × perMinuteRate
+              // Cap: Maximum maxPerMinuteFine days per violation
+              const fineForThisDay = Math.min(
+                dayViolationMinutes * vConfig.perMinuteRate,
+                vConfig.maxPerMinuteFine
+              );
+              perMinuteFineDays += fineForThisDay;
+              
+              // DEBUG LOGGING: Flag suspiciously high fines for investigation
+              if (fineForThisDay >= vConfig.maxPerMinuteFine || dayViolationMinutes > 200) {
+                console.log(`[DEBUG] High per-minute fine for ${emp.empCode} on ${date}:`, {
+                  empCode: emp.empCode,
+                  date,
+                  violationDay: vNo,
+                  dayViolationMinutes,
+                  fineForThisDay,
+                  late,
+                  earlyLeave,
+                  lateMinutes,
+                  earlyMinutes,
+                });
+              }
             }
           }
-          // Note: vNo <= 3 but not multiple of 3 means violations #1 and #2 are FREE (no deduction)
+          // Note: vNo <= freeViolations means violations #1, #2, etc. are FREE (no deduction)
         }
 
         // ----------------- ABSENT / MISSING PUNCH DEDUCTION -----------------------
-        // According to new policy:
-        // - Missing BOTH check-in AND check-out = 1 day salary deduction
-        // - Missing ONLY check-in OR ONLY check-out = 1.5 days salary deduction
-        // - Leave Without Inform status = 1.5 days salary deduction
-        // - Paid Leave = NO salary deduction
-        // - Unpaid Leave = 1 full day salary deduction
-        // - Sick Leave = 1 full day salary deduction (treated as unpaid)
-        
+        // Use rules from database
         const partialPunch = (checkIn && !checkOut) || (!checkIn && checkOut);
-        // bothMissing already defined above (line 599)
+        // bothMissing already defined above
         const excusedForMissing = earlyExcused || lateExcused;
         
         // Determine if this is an absent day (missing punch OR no punch at all)
@@ -1047,34 +1097,26 @@ export async function GET(req) {
           status !== 'Leave Without Inform' &&
           !excusedForMissing;
         
-        // Apply absent deduction (only once, not double counted)
+        // Apply absent deduction using database rules
         // IMPORTANT: Don't count if it's already a leave (Unpaid Leave, Sick Leave, or Leave Without Inform)
         if (isAbsentDay && !isWeekendOff && status !== 'Un Paid Leave' && status !== 'Sick Leave' && status !== 'Leave Without Inform') {
-          if (bothMissing) {
-            // Both check-in and check-out missing = 1 day deduction
-            absentDays += 1;
-          } else if (partialPunch) {
-            // Only one punch missing = 1 day deduction (not 1.5)
-            absentDays += 1;
-          }
+          const missingPunchDays = getMissingPunchDeductionDays(bothMissing, partialPunch, violationRules.absentConfig);
+          absentDays += missingPunchDays;
         }
 
         // ----------------- LEAVE / HALF-DAY RULES ----------------
-        // Unpaid Leave and Sick Leave both deduct 1 full day salary
-        if (status === 'Un Paid Leave') {
-          unpaidLeaveDays += 1; // 1 full day deduction
-        } else if (status === 'Sick Leave') {
-          // Sick leave is treated as unpaid (1 day deduction) per policy
-          unpaidLeaveDays += 1;
+        // Use database rules for leave deductions
+        const leaveDeduction = getLeaveDeductionDays(status, violationRules.leaveConfig, violationRules.absentConfig);
+        
+        if (status === 'Un Paid Leave' || status === 'Sick Leave') {
+          unpaidLeaveDays += leaveDeduction;
         } else if (status === 'Leave Without Inform') {
-          // Leave Without Inform = 1.5 days salary deduction
-          absentDays += 1.5;
+          // Leave Without Inform is handled in absentConfig
+          absentDays += leaveDeduction;
+        } else if (status === 'Half Day') {
+          halfDays += leaveDeduction;
         }
         // Paid Leave = no deduction (excluded from all deduction logic)
-
-        if (status === 'Half Day') {
-          halfDays += 0.5;
-        }
 
         days.push({
           date,
@@ -1220,10 +1262,17 @@ export async function GET(req) {
       }
 
       const grossSalary = emp.monthlySalary || 0;
-      // You can change divisor (30) to 26 or 31 if company policy is different
-      const perDaySalary = grossSalary > 0 ? grossSalary / 30 : 0;
-      const salaryDeductAmount = perDaySalary * salaryDeductDays;
-      const netSalary = grossSalary - salaryDeductAmount;
+      // Use actual days in the month for salary calculation (more accurate than fixed 30 days)
+      // This handles months with 28, 29, 30, or 31 days correctly
+      const actualDaysInMonth = daysInMonth; // Already calculated from the month
+      const salaryCalc = calculateSalaryAmounts(
+        grossSalary, 
+        salaryDeductDays, 
+        { daysPerMonth: actualDaysInMonth } // Use actual month days instead of rule's default
+      );
+      const perDaySalary = salaryCalc.perDaySalary;
+      const salaryDeductAmount = salaryCalc.deductionAmount;
+      const netSalary = salaryCalc.netSalary;
 
       // Get dynamic shift for the employee - use current shift assignment (no history)
       let dynamicShift = emp.shift || '';
@@ -1303,14 +1352,20 @@ export async function GET(req) {
       });
     });
 
-    // Add cache headers for better performance (1 minute cache for monthly data)
-    return NextResponse.json({
+    // Return data for caching
+    return {
       month: monthPrefix,
       daysInMonth,
       employees: employeesOut,
-    }, {
+    };
+      },
+      CACHE_TTL.MONTHLY_ATTENDANCE
+    );
+
+    // Add cache headers for better performance
+    return NextResponse.json(result, {
       headers: {
-        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
       },
     });
   } catch (err) {
@@ -1522,6 +1577,24 @@ export async function POST(req) {
     // Then insert/update with the new shift
     await ShiftAttendance.deleteMany({ date, empCode });
     await ShiftAttendance.create(update);
+
+    // PERFORMANCE: Invalidate monthly attendance cache after update
+    // Extract month from date (YYYY-MM-DD) to get YYYY-MM
+    const monthStr = date.substring(0, 7); // Extract YYYY-MM from YYYY-MM-DD
+    const searchParams = new URLSearchParams({ month: monthStr });
+    const cacheKeyToInvalidate = generateCacheKey('monthly-attendance', searchParams);
+    
+    // Invalidate the specific cache key
+    invalidateCache(cacheKeyToInvalidate);
+    
+    // Also invalidate all monthly-attendance caches for this month (in case of different query params)
+    invalidateCache('monthly-attendance');
+    
+    // Also invalidate daily attendance cache for this date (might be affected)
+    const dailySearchParams = new URLSearchParams({ date });
+    const dailyCacheKey = generateCacheKey('daily-attendance', dailySearchParams);
+    invalidateCache(dailyCacheKey);
+    invalidateCache('daily-attendance'); // Also invalidate all daily-attendance caches
 
     return NextResponse.json({ success: true });
   } catch (err) {

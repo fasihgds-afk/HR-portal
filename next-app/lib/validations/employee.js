@@ -64,11 +64,13 @@ export function validateEmployee(data, isUpdate = false) {
     return { success: true, data: validated };
   } catch (error) {
     if (error instanceof z.ZodError) {
+      // Zod uses 'issues' property, not 'errors'
+      const issues = error.issues || error.errors || [];
       return {
         success: false,
-        errors: error.errors.map((e) => ({
-          field: e.path.join('.'),
-          message: e.message,
+        errors: issues.map((e) => ({
+          field: Array.isArray(e.path) ? e.path.join('.') : String(e.path || ''),
+          message: e.message || 'Validation error',
         })),
       };
     }

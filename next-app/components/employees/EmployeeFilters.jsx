@@ -34,10 +34,7 @@ const selectStyle = {
 
 export default function EmployeeFilters({
   searchQuery,
-  selectedShift,
-  shifts,
   onSearchChange,
-  onShiftChange,
 }) {
   return (
     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -81,37 +78,6 @@ export default function EmployeeFilters({
             }}
           />
         </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}
-        >
-          Filter by Shift
-        </label>
-        <select
-          style={selectStyle}
-          value={selectedShift}
-          onChange={(e) => onShiftChange(e.target.value)}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = '#3b82f6';
-            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = '#d1d5db';
-            e.currentTarget.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.05)';
-          }}
-        >
-          <option value="">All Shifts</option>
-          {shifts.length > 0 ? (
-            shifts.map((shift) => (
-              <option key={shift._id} value={shift.code}>
-                {shift.code} – {shift.name} ({shift.startTime}–{shift.endTime})
-              </option>
-            ))
-          ) : (
-            <option value="" disabled>No shifts available. Please create shifts first.</option>
-          )}
-        </select>
       </div>
     </div>
   );

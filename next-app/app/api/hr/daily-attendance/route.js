@@ -6,7 +6,7 @@ import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import EmployeeShiftHistory from '../../../../models/EmployeeShiftHistory';
 import Shift from '../../../../models/Shift';
-import { getOrSetCache, CACHE_TTL } from '../../../../lib/cache/cacheHelper';
+// Cache removed for simplicity and real-time data
 
 export const dynamic = 'force-dynamic'; // avoid caching in dev
 
