@@ -80,10 +80,25 @@ export async function GET(req) {
     ];
     
     // AGGREGATION PIPELINE - No Mongoose find() queries used here at all
-    const employees = await Employee.aggregate(pipeline);
+    // Wrap in try-catch to catch aggregation errors specifically
+    let employees = [];
+    let total = 0;
     
-    // Count also uses aggregation for consistency
-    const total = await Employee.countDocuments(queryFilter);
+    try {
+      employees = await Employee.aggregate(pipeline);
+      
+      // Count also uses countDocuments for consistency
+      total = await Employee.countDocuments(queryFilter);
+    } catch (aggError) {
+      console.error('Aggregation error:', {
+        error: aggError.message,
+        stack: aggError.stack,
+        filter: queryFilter,
+        pipeline: JSON.stringify(pipeline),
+      });
+      // Re-throw with more context
+      throw new Error(`Database query failed: ${aggError.message}`);
+    }
 
     return NextResponse.json({
       items: employees || [],
