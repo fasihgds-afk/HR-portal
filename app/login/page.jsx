@@ -61,8 +61,10 @@ function LoginInner() {
         return;
       }
 
-      // Use window.location for a full page reload to ensure session cookie is sent
-      window.location.href = result.url || "/hr/employees";
+      // Optimize: Use router.push instead of window.location for faster navigation
+      // Next.js router is faster than full page reload
+      // The session cookie will still be sent with the next request
+      router.push(result.url || "/hr/employees");
     } catch (err) {
       console.error("HR login error", err);
       setErrorMsg("Something went wrong. Please try again.");

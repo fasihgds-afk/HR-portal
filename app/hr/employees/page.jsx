@@ -46,56 +46,67 @@ export default function HrDashboardPage() {
   };
 
   // ---- EMPLOYEE DATA FOR OVERVIEW STATS ----
+  // LAZY LOADING: Don't load data immediately - only when needed
   const [employees, setEmployees] = useState([]);
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(false); // Start as false - no loading initially
   const [statsError, setStatsError] = useState("");
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false); // Track if data has been loaded
 
-  useEffect(() => {
+  // Lazy load function - only called when needed
+  async function loadEmployees() {
+    // Prevent duplicate loads
+    if (statsLoading || dataLoaded) return;
+
     let cancelled = false;
+    try {
+      setStatsLoading(true);
+      setStatsError("");
 
-    async function loadEmployees() {
-      try {
-        setStatsLoading(true);
-        setStatsError("");
+      const res = await fetch("/api/hr/employees", {
+        cache: 'no-store', // Always get fresh data
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Request failed (${res.status})`);
+      }
 
-        // Add cache: 'force-cache' for better performance (uses browser cache)
-        const res = await fetch("/api/hr/employees", {
-          cache: 'force-cache', // Use browser cache if available
-        });
-        
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Request failed (${res.status})`);
-        }
+      const data = await res.json();
+      const list = Array.isArray(data)
+        ? data
+        : data.employees || data.items || [];
 
-        const data = await res.json();
-        const list = Array.isArray(data)
-          ? data
-          : data.employees || data.items || [];
-
-        if (!cancelled) {
-          setEmployees(list);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("Employee stats load error:", err);
-          setStatsError(err.message || "Failed to load employee stats.");
-        }
-      } finally {
-        if (!cancelled) {
-          setStatsLoading(false);
-        }
+      if (!cancelled) {
+        setEmployees(list);
+        setDataLoaded(true);
+      }
+    } catch (err) {
+      if (!cancelled) {
+        console.error("Employee stats load error:", err);
+        setStatsError(err.message || "Failed to load employee stats.");
+      }
+    } finally {
+      if (!cancelled) {
+        setStatsLoading(false);
       }
     }
+  }
 
-    loadEmployees();
+  // Load data when overview tab is clicked or after a short delay (lazy loading)
+  useEffect(() => {
+    if (!session) return;
 
-    // Cleanup function to prevent state updates if component unmounts
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    // If overview tab is active, load data after a short delay (non-blocking)
+    if (tab === "overview" && !dataLoaded && !statsLoading) {
+      // Small delay to let page render first (perceived performance)
+      const timer = setTimeout(() => {
+        loadEmployees();
+      }, 300); // 300ms delay - page renders first, then loads data
+
+      return () => clearTimeout(timer);
+    }
+  }, [tab, session, dataLoaded, statsLoading]);
 
   // 📊 Compute stats from employees
   const stats = useMemo(() => {
@@ -648,8 +659,59 @@ export default function HrDashboardPage() {
               Live snapshot of your workforce – headcount, departments and quick
               access to employee &amp; attendance tools.
             </p>
+            
+            {/* Trigger data load when overview tab is viewed */}
+            {!dataLoaded && !statsLoading && (
+              <div style={{ 
+                padding: "20px", 
+                textAlign: "center",
+                color: colors.text.secondary,
+                fontSize: 14,
+              }}>
+                <div style={{ marginBottom: 12 }}>📊 Loading statistics...</div>
+                <button
+                  onClick={loadEmployees}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    border: `1px solid ${colors.border.default}`,
+                    backgroundColor: colors.background.button,
+                    color: colors.text.primary,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Load Data Now
+                </button>
+              </div>
+            )}
 
-            {/* ENHANCED STATS CARDS */}
+            {/* Show loading spinner while loading */}
+            {statsLoading && (
+              <div style={{ 
+                padding: "40px", 
+                textAlign: "center",
+                color: colors.text.secondary,
+                fontSize: 14,
+                marginBottom: 24,
+              }}>
+                <div style={{ 
+                  display: "inline-block",
+                  width: 40,
+                  height: 40,
+                  border: `4px solid ${colors.border.default}`,
+                  borderTopColor: colors.primary[500],
+                  borderRadius: "50%",
+                  animation: "spin 1s linear infinite",
+                  marginBottom: 12,
+                }} />
+                <div>Loading dashboard data...</div>
+              </div>
+            )}
+
+            {/* ENHANCED STATS CARDS - Only show when data is loaded */}
+            {dataLoaded && !statsLoading && (
             <div
               className="stats-grid"
               style={{
@@ -913,8 +975,10 @@ export default function HrDashboardPage() {
                 </div>
               </div>
             </div>
+            )}
 
-            {/* ENHANCED Employees by department */}
+            {/* ENHANCED Employees by department - Only show when data is loaded */}
+            {dataLoaded && !statsLoading && (
             <div
               style={{
                 borderRadius: 16,
@@ -1074,8 +1138,9 @@ export default function HrDashboardPage() {
                 </div>
               )}
             </div>
+            )}
 
-            {/* ENHANCED ACTION CARDS */}
+            {/* ENHANCED ACTION CARDS - Always visible */}
             <div
               style={{
                 display: "grid",
