@@ -2,109 +2,118 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '../../../lib/db';
 import Employee from '../../../models/Employee';
+import { generateCacheKey, getOrSetCache, invalidateEmployeeCache, CACHE_TTL } from '../../../lib/cache/cacheHelper';
 import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/queryOptimizer';
-import { NotFoundError, ValidationError } from '../../../lib/errors/errorHandler';
-import { validateEmployee } from '../../../lib/validations/employee';
 
-// SIMPLE APPROACH - No caching, no wrappers, no monitoring - just direct Mongoose queries with .lean()
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const runtime = 'nodejs'; // Explicitly set runtime for Vercel
-export const fetchCache = 'force-no-store'; // Disable fetch caching
 
 // GET /api/employee
 // - /api/employee?empCode=943425  -> single employee { employee: {...} }
 // - /api/employee                  -> list { items: [...] }
 export async function GET(req) {
   try {
-    // Log all requests for debugging (including production)
-    console.log('[Employee API] GET request received:', {
-      url: req.url,
-      timestamp: new Date().toISOString(),
-      env: process.env.NODE_ENV,
-    });
-
     await connectDB();
 
     const { searchParams } = new URL(req.url);
     const empCode = searchParams.get('empCode');
-    
-    console.log('[Employee API] Query params:', { empCode, searchParams: Object.fromEntries(searchParams) });
+
+    // Use optimized projection (includes images for single employee, excludes base64 for lists)
+    const projection = getEmployeeProjection(true); // Include images
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
-      // SIMPLE: Use Mongoose with .select() and .lean() - execute immediately
-      const projection = getEmployeeProjection(true);
-      const employee = await Employee.findOne({ empCode })
-        .select(projection)
-        .lean();
+      const cacheKey = generateCacheKey(`employee:${empCode}`, searchParams);
       
-      if (!employee) {
-        throw new NotFoundError(`Employee ${empCode}`);
+      const result = await getOrSetCache(
+        cacheKey,
+        async () => {
+          const employee = await Employee.findOne({ empCode }, projection).lean();
+          
+          if (!employee) {
+            return { error: `Employee ${empCode} not found`, status: 404 };
+          }
+          
+          return { employee };
+        },
+        CACHE_TTL.EMPLOYEE_SINGLE
+      );
+      
+      if (result.error) {
+        return NextResponse.json(
+          { error: result.error },
+          { status: result.status }
+        );
       }
       
-      return NextResponse.json({ employee });
+      return NextResponse.json(result);
     }
 
     // Otherwise → return list with pagination (used by admin/HR UI)
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
-    const search = (searchParams.get('search') || '').trim();
-    let shift = (searchParams.get('shift') || '').trim();
-    const department = (searchParams.get('department') || '').trim();
-    
-    // Normalize "All Shifts" - empty string means all shifts
-    if (shift === 'All Shifts' || shift === 'all shifts') {
-      shift = '';
-    }
+    const search = searchParams.get('search') || '';
+    const shift = searchParams.get('shift') || '';
+    const department = searchParams.get('department') || '';
 
-    // Build filter
-    const { filter, sortOptions } = buildEmployeeFilter({ search, shift, department });
-    const skip = (page - 1) * limit;
+    // Build optimized query filter
+    const filter = buildEmployeeFilter({ search, shift, department });
     
-    // Use direct Mongoose queries instead of aggregation for simplicity and reliability
-    // Aggregation can have issues in serverless environments
-    const queryFilter = Object.keys(filter).length > 0 ? filter : {};
-    
-    // Log filter for debugging
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Employee API] Query filter:', queryFilter);
-    }
-    
-    // Get projection from helper (consistent with other queries)
+    // Use optimized projection (exclude base64 images for list views)
     const listProjection = getEmployeeProjection(false);
+
+    // Check if client wants to bypass cache (for real-time updates)
+    const bypassCache = searchParams.get('_t') || searchParams.get('no-cache');
     
-    // Execute queries sequentially to avoid any issues
-    const employees = await Employee.find(queryFilter)
-      .select(listProjection)
-      .sort(sortOptions || { empCode: 1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
-      .exec(); // Explicitly execute the query
-    
-    const total = await Employee.countDocuments(queryFilter).exec();
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Employee API] Query result:', { count: employees.length, total });
+    // Fetch function
+    const fetchEmployees = async () => {
+      // Calculate pagination
+      const skip = (page - 1) * limit;
+      
+      // Get total count for pagination
+      const total = await Employee.countDocuments(filter);
+      
+      // Get paginated employees with optimized projection
+      const employees = await Employee.find(filter, listProjection)
+        .sort({ empCode: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      return {
+        items: employees,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    };
+
+    // If bypassing cache, fetch directly
+    if (bypassCache) {
+      const result = await fetchEmployees();
+      return NextResponse.json(result);
     }
 
-    return NextResponse.json({
-      items: employees || [],
-      pagination: {
-        page,
-        limit,
-        total: total || 0,
-        totalPages: Math.ceil((total || 0) / limit),
-      },
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-      },
-    });
+    // Otherwise, use cache for better performance
+    const cacheKey = generateCacheKey('employees', searchParams);
+    
+    const result = await getOrSetCache(
+      cacheKey,
+      fetchEmployees,
+      CACHE_TTL.EMPLOYEE_LIST
+    );
+
+    return NextResponse.json(result);
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    console.error('GET /api/employee error:', err);
+    return NextResponse.json(
+      {
+        error: err?.message || 'Failed to load employees',
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -114,25 +123,20 @@ export async function POST(req) {
     await connectDB();
 
     const body = await req.json();
-    
-    // Validate input
-    const validation = validateEmployee(body, true);
-    if (!validation.success) {
-      throw new ValidationError('Validation failed', validation.errors);
-    }
-
-    const validatedData = validation.data;
-    const { empCode } = validatedData;
+    const { empCode, ...updateData } = body;
 
     if (!empCode) {
-      throw new ValidationError('empCode is required');
+      return NextResponse.json(
+        { error: 'empCode is required' },
+        { status: 400 }
+      );
     }
 
-    // Build update object
+    // Build update object (exclude empCode from update)
     const update = {};
-    Object.keys(validatedData).forEach((key) => {
-      if (validatedData[key] !== undefined && key !== 'empCode') {
-        update[key] = validatedData[key];
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] !== undefined) {
+        update[key] = updateData[key];
       }
     });
 
@@ -140,17 +144,25 @@ export async function POST(req) {
       update.monthlySalary = Number(update.monthlySalary);
     }
 
-    // Execute update directly
+    // Execute update
     const employee = await Employee.findOneAndUpdate(
       { empCode },
       { $set: update },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
+    // Invalidate cache for this employee and list
+    await invalidateEmployeeCache(empCode);
+
     return NextResponse.json({ employee });
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    console.error('POST /api/employee error:', err);
+    return NextResponse.json(
+      {
+        error: err?.message || 'Failed to save employee',
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -163,14 +175,23 @@ export async function DELETE(req) {
     const empCode = searchParams.get('empCode');
 
     if (!empCode) {
-      throw new ValidationError('empCode is required');
+      return NextResponse.json(
+        { error: 'empCode is required' },
+        { status: 400 }
+      );
     }
 
     const deleted = await Employee.findOneAndDelete({ empCode });
 
     if (!deleted) {
-      throw new NotFoundError(`Employee ${empCode}`);
+      return NextResponse.json(
+        { error: `Employee ${empCode} not found` },
+        { status: 404 }
+      );
     }
+
+    // Invalidate cache for this employee and list
+    await invalidateEmployeeCache(empCode);
 
     return NextResponse.json({
       success: true,
@@ -178,7 +199,12 @@ export async function DELETE(req) {
       employee: deleted,
     });
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    console.error('DELETE /api/employee error:', err);
+    return NextResponse.json(
+      {
+        error: err?.message || 'Failed to delete employee',
+      },
+      { status: 500 }
+    );
   }
 }
