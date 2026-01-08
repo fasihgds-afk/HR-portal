@@ -70,6 +70,10 @@ export async function GET(req) {
     const shift = searchParams.get('shift') || '';
     const department = searchParams.get('department') || '';
 
+    // First, check total employees in database (without any filter) for debugging
+    const totalEmployeesInDB = await Employee.countDocuments({});
+    console.log('[Employee API] 🔍 Total employees in database (no filter):', totalEmployeesInDB);
+    
     // Build optimized query filter
     const { filter, sortOptions } = buildEmployeeFilter({ search, shift, department });
     
@@ -90,6 +94,11 @@ export async function GET(req) {
     // Get total count for pagination
     const total = await Employee.countDocuments(filter);
     console.log('[Employee API] Total employees matching filter:', total);
+    
+    // If filter returns 0 but database has employees, log warning
+    if (total === 0 && totalEmployeesInDB > 0) {
+      console.warn('[Employee API] ⚠️ Filter is too restrictive! Database has', totalEmployeesInDB, 'employees but filter returns 0');
+    }
     
     // Get paginated employees with optimized projection
     const employees = await Employee.find(filter, listProjection)
