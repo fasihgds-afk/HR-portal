@@ -85,12 +85,15 @@ export function handleError(err, req) {
     }
   }
 
-  // Handle Mongoose validation errors
-  if (err.name === 'ValidationError') {
-    const errors = Object.values(err.errors || {}).map((e) => ({
-      field: e.path,
-      message: e.message,
-    }));
+  // Handle Mongoose validation errors (not our custom ValidationError)
+  if (err.name === 'ValidationError' && !(err instanceof AppError)) {
+    const errors = err.errors && typeof err.errors === 'object'
+      ? Object.values(err.errors).map((e) => ({
+          field: e?.path || 'unknown',
+          message: e?.message || 'Validation error',
+        }))
+      : [{ field: 'unknown', message: 'Validation failed' }];
+    
     return NextResponse.json(
       { error: 'Validation failed', details: errors },
       { status: 400 }

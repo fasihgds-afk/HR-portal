@@ -34,10 +34,15 @@ export async function POST(req) {
       validated = registerSchema.parse(body);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        throw new ValidationError('Validation failed', error.errors.map(e => ({
-          field: e.path.join('.'),
-          message: e.message,
-        })));
+        // Safely handle errors array - ensure it exists and is an array
+        const errors = (error.errors && Array.isArray(error.errors)) 
+          ? error.errors.map(e => ({
+              field: Array.isArray(e.path) ? e.path.join('.') : String(e.path || ''),
+              message: e.message || 'Validation error',
+            }))
+          : [{ field: 'unknown', message: 'Validation failed' }];
+        
+        throw new ValidationError('Validation failed', errors);
       }
       throw error;
     }
