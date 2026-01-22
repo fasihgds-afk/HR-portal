@@ -930,9 +930,24 @@ export default function EmployeeDashboardPage() {
     loadEmployeeProfile();
   }, [empCode]);
 
-  // monthly attendance (same API as HR page)
+  // monthly attendance (same API as HR page) - LAZY LOADING
+  // Only load when user interacts or after a delay
+  const [attendanceDataLoaded, setAttendanceDataLoaded] = useState(false);
+  
   useEffect(() => {
     if (!empCode) return;
+    
+    // Lazy load: Wait 500ms after page load before fetching attendance
+    // This allows the page to render first
+    const timer = setTimeout(() => {
+      setAttendanceDataLoaded(true);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [empCode]);
+
+  useEffect(() => {
+    if (!empCode || !attendanceDataLoaded) return;
 
     async function loadMonth() {
       try {
@@ -957,7 +972,7 @@ export default function EmployeeDashboardPage() {
     }
 
     loadMonth();
-  }, [month, empCode]);
+  }, [month, empCode, attendanceDataLoaded]);
 
   // Handle profile update
   async function handleProfileUpdate(formData) {
