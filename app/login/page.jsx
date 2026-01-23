@@ -61,22 +61,11 @@ function LoginInner() {
         return;
       }
 
-      // Verify session was created before redirecting (important for Vercel)
-      // Retry up to 3 times with delays to ensure session cookie is set
-      let session = null;
-      for (let i = 0; i < 3; i++) {
-        await new Promise(resolve => setTimeout(resolve, 200 * (i + 1)));
-        session = await getSession();
-        if (session) break;
-      }
-
-      if (!session) {
-        setErrorMsg("Session creation failed. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      // Use window.location for full page reload to ensure session cookie is sent
+      // On Vercel, session cookies may take a moment to propagate
+      // Use a short delay then redirect - the middleware will handle auth check
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Force a full page navigation to ensure cookies are sent
       window.location.href = "/hr/employees";
     } catch (err) {
       console.error("HR login error", err);
