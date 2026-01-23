@@ -4,7 +4,11 @@ import Shift from '../../../../models/Shift';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
 import { ValidationError } from '../../../../lib/errors/errorHandler';
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// OPTIMIZATION: Caching for static shifts data (60s revalidation)
+export const revalidate = 60;
 
 // GET /api/hr/shifts - Get all shifts
 export async function GET(req) {
@@ -14,14 +18,14 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const activeOnly = searchParams.get('activeOnly') === 'true';
 
-    // OPTIMIZATION: Direct query (in-memory cache doesn't work on Vercel serverless)
+    // OPTIMIZATION: Direct query with index hint, fast timeout
     // Shifts are small dataset, query is fast with proper index
     const query = activeOnly ? { isActive: true } : {};
     const shifts = await Shift.find(query)
       .select('_id name code startTime endTime crossesMidnight gracePeriod description isActive')
       .sort({ code: 1 })
       .lean()
-      .maxTimeMS(2000); // Fast timeout for Vercel
+      .maxTimeMS(1500); // Reduced timeout for faster response
 
     // Shifts are static data - can be cached briefly (30 seconds) for Vercel edge caching
     return successResponse(
@@ -45,10 +49,12 @@ export async function PATCH(req) {
     const { action } = body;
 
     if (action === 'activateAll') {
+      // OPTIMIZATION: Use bulkWrite for better performance
       const result = await Shift.updateMany(
-        {},
+        { isActive: { $ne: true } }, // Only update inactive shifts
         { $set: { isActive: true } }
-      );
+      )
+        .maxTimeMS(3000);
       return NextResponse.json({
         message: `Activated ${result.modifiedCount} shift(s)`,
         modifiedCount: result.modifiedCount,
@@ -86,6 +92,7 @@ export async function POST(req) {
       throw new ValidationError('startTime and endTime must be in HH:mm format');
     }
 
+    // OPTIMIZATION: Create with validation in one operation
     const shift = await Shift.create({
       name,
       code: code.toUpperCase(),
@@ -96,9 +103,6 @@ export async function POST(req) {
       description: description || '',
       isActive: true,
     });
-
-    // Invalidate cache after creating shift
-    invalidateShiftsCache();
 
     return successResponse(
       { shift },

@@ -27,15 +27,17 @@ export async function GET(req) {
     const skip = (page - 1) * limit;
 
     // OPTIMIZATION: Run count and data queries in parallel for faster response
+    // MongoDB will auto-select the compound index { department: 1, empCode: 1 } for sorting
     const [total, employees] = await Promise.all([
-      Employee.countDocuments({}).maxTimeMS(3000),
+      Employee.countDocuments({})
+        .maxTimeMS(2500), // Reduced timeout
       Employee.find({})
         .select(EMPLOYEE_LIST_FIELDS)
         .sort({ department: 1, empCode: 1 }) // Uses compound index { department: 1, empCode: 1 }
         .skip(skip)
         .limit(limit)
         .lean()
-        .maxTimeMS(3000)
+        .maxTimeMS(2500) // Reduced timeout
     ]);
 
     const hasNext = skip + employees.length < total;

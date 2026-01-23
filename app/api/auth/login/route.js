@@ -6,6 +6,10 @@ import bcrypt from 'bcryptjs';
 import { successResponse, errorResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
 import { ValidationError, UnauthorizedError } from '../../../../lib/errors/errorHandler';
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req) {
   try {
     await connectDB();
@@ -23,7 +27,11 @@ export async function POST(req) {
         throw new ValidationError('email and password are required for HR login');
       }
 
-      const user = await User.findOne({ email, role: 'HR' }).lean();
+      // OPTIMIZATION: Select only required fields, add timeout
+      const user = await User.findOne({ email, role: 'HR' })
+        .select('passwordHash role')
+        .lean()
+        .maxTimeMS(2000);
       if (!user) {
         throw new UnauthorizedError('Invalid HR credentials');
       }
@@ -46,15 +54,23 @@ export async function POST(req) {
         throw new ValidationError('empCode and cnic are required for employee login');
       }
 
-      const employee = await Employee.findOne({ empCode, cnic }).lean();
+      // OPTIMIZATION: Select only required fields, add timeout
+      const employee = await Employee.findOne({ empCode, cnic })
+        .select('empCode name')
+        .lean()
+        .maxTimeMS(2000);
       if (!employee) {
         throw new UnauthorizedError('Employee not found for given code + CNIC');
       }
 
+      // OPTIMIZATION: Select only required fields
       let user = await User.findOne({
         role: 'EMPLOYEE',
         employeeEmpCode: empCode,
-      }).lean();
+      })
+        .select('role employeeEmpCode')
+        .lean()
+        .maxTimeMS(2000);
 
       // Optionally auto-create a User row once employee is verified
       if (!user) {

@@ -4,9 +4,12 @@ import { connectDB } from '../../../../lib/db';
 import ViolationRules from '../../../../models/ViolationRules';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
 import { ValidationError } from '../../../../lib/errors/errorHandler';
-// Cache removed for simplicity and real-time data
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// OPTIMIZATION: Caching for static violation rules (60s revalidation)
+export const revalidate = 60;
 
 // GET /api/hr/violation-rules
 // Returns the active violation rules configuration
@@ -14,8 +17,9 @@ export async function GET(req) {
   try {
     await connectDB();
 
-    // Get the active rules (should be only one) - optimized for Vercel
+    // OPTIMIZATION: Get the active rules with minimal fields, fast timeout
     const activeRules = await ViolationRules.findOne({ isActive: true })
+      .select('violationConfig absentConfig leaveConfig salaryConfig isActive description')
       .lean()
       .maxTimeMS(2000); // Fast timeout for Vercel
 
@@ -50,7 +54,10 @@ export async function GET(req) {
       });
     }
 
-    return NextResponse.json({ rules: activeRules });
+    // OPTIMIZATION: Add cache headers for static violation rules
+    const response = NextResponse.json({ rules: activeRules });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
+    return response;
   } catch (err) {
     console.error('GET /api/hr/violation-rules error:', err);
     return NextResponse.json(

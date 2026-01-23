@@ -6,11 +6,11 @@ import { NotFoundError, ValidationError } from '../../../lib/errors/errorHandler
 import { validateEmployee } from '../../../lib/validations/employee';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../lib/api/response';
 
-// SIMPLE APPROACH - No caching, no wrappers, no monitoring - just direct Mongoose queries with .lean()
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-export const runtime = 'nodejs'; // Explicitly set runtime for Vercel
-export const fetchCache = 'force-no-store'; // Disable fetch caching
+export const fetchCache = 'force-no-store';
 
 // Helper function to convert ObjectId shift to shift code
 async function normalizeShiftField(shiftValue) {
@@ -50,11 +50,12 @@ export async function GET(req) {
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
-      // SIMPLE: Use Mongoose with .select() and .lean() - execute immediately
+      // OPTIMIZATION: Use Mongoose with .select() and .lean(), add timeout
       const projection = getEmployeeProjection(true);
       const employee = await Employee.findOne({ empCode })
         .select(projection)
-        .lean();
+        .lean()
+        .maxTimeMS(2000); // Fast timeout
       
       if (!employee) {
         throw new NotFoundError(`Employee ${empCode}`);
@@ -101,7 +102,7 @@ export async function GET(req) {
     const listProjection = getEmployeeProjection(false);
     
     // OPTIMIZATION: Run find and countDocuments in parallel for faster response
-    // Reduced timeouts for Vercel serverless (faster failure, better UX)
+    // Removed hints - MongoDB will auto-select best index (multiple indexes on empCode cause conflicts)
     const [employees, total] = await Promise.all([
       Employee.find(queryFilter)
         .select(listProjection)
@@ -109,10 +110,10 @@ export async function GET(req) {
         .skip(skip)
         .limit(limit)
         .lean()
-        .maxTimeMS(3000) // Reduced to 3 seconds for Vercel
+        .maxTimeMS(2500) // Reduced timeout
         .exec(),
       Employee.countDocuments(queryFilter)
-        .maxTimeMS(3000) // Reduced to 3 seconds for Vercel
+        .maxTimeMS(2000) // Reduced timeout
         .exec()
     ]);
     
@@ -280,7 +281,10 @@ export async function DELETE(req) {
       throw new ValidationError('empCode is required');
     }
 
-    const deleted = await Employee.findOneAndDelete({ empCode });
+    // OPTIMIZATION: Add timeout for delete operation
+    const deleted = await Employee.findOneAndDelete({ empCode })
+      .lean()
+      .maxTimeMS(2000);
 
     if (!deleted) {
       throw new NotFoundError(`Employee ${empCode}`);

@@ -4,6 +4,8 @@ import Shift from '../../../../../models/Shift';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../../lib/api/response';
 import { NotFoundError, ValidationError } from '../../../../../lib/errors/errorHandler';
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // GET /api/hr/shifts/[id] - Get a specific shift
@@ -14,13 +16,20 @@ export async function GET(req, { params }) {
     // Handle both Next.js 14 and 15 (params might be a promise in Next.js 15)
     const resolvedParams = params instanceof Promise ? await params : params;
     const { id } = resolvedParams;
-    const shift = await Shift.findById(id).lean();
+    // OPTIMIZATION: Select only required fields, add timeout
+    const shift = await Shift.findById(id)
+      .select('_id name code startTime endTime crossesMidnight gracePeriod description isActive')
+      .lean()
+      .maxTimeMS(2000);
 
     if (!shift) {
       return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ shift });
+    // OPTIMIZATION: Add cache headers for static shift data
+    const response = NextResponse.json({ shift });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
+    return response;
   } catch (err) {
     console.error('GET /api/hr/shifts/[id] error:', err);
     return NextResponse.json(
@@ -78,17 +87,25 @@ export async function PUT(req, { params }) {
     if (description !== undefined) update.description = description;
     if (isActive !== undefined) update.isActive = isActive;
 
-    console.log('Updating shift with:', { id, update });
-
-    const shift = await Shift.findByIdAndUpdate(id, { $set: update }, { new: true }).lean();
+    // OPTIMIZATION: Use lean() and select only required fields
+    const shift = await Shift.findByIdAndUpdate(
+      id, 
+      { $set: update }, 
+      { new: true, runValidators: true }
+    )
+      .select('_id name code startTime endTime crossesMidnight gracePeriod description isActive')
+      .lean()
+      .maxTimeMS(3000);
 
     if (!shift) {
       console.error('Shift not found with ID:', id);
       return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
     }
 
-    // Shift updated successfully (cache removed - direct queries on Vercel)
-    return NextResponse.json({ shift });
+    // OPTIMIZATION: Add cache headers for static shift data
+    const response = NextResponse.json({ shift });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
+    return response;
   } catch (err) {
     console.error('PUT /api/hr/shifts/[id] error:', err);
     if (err.name === 'CastError' || err.message?.includes('Cast to ObjectId')) {

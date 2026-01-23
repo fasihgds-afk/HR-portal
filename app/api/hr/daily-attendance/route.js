@@ -10,7 +10,9 @@ import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Shift from '../../../../models/Shift';
 // Cache removed for simplicity and real-time data
 
-export const dynamic = 'force-dynamic'; // avoid caching in dev
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * ============================================================================
@@ -302,24 +304,26 @@ export async function POST(req) {
                        String(nextDateObj.getUTCMonth() + 1).padStart(2, '0') + '-' + 
                        String(nextDateObj.getUTCDate()).padStart(2, '0');
 
-    // PERFORMANCE: Parallelize independent queries
+    // OPTIMIZATION: Parallelize independent queries with reduced timeouts
     const [allEmployees, existingRecords, nextDayRecords] = await Promise.all([
-      // Load ALL employees (we want to show present + absent)
-      // Use optimized projection - exclude large base64 images
+      // OPTIMIZATION: Load employees with minimal fields
       Employee.find()
-        .select('empCode name shift department designation')
+        .select('empCode name shift shiftId department designation')
         .lean()
-        .maxTimeMS(3000), // Fast timeout for Vercel
+        .maxTimeMS(2000), // Reduced timeout
       
       // Load existing ShiftAttendance records for this date
+      // OPTIMIZATION: MongoDB will auto-select date index
       ShiftAttendance.find({ date: date })
+        .select('date empCode checkIn checkOut shift attendanceStatus')
         .lean()
-        .maxTimeMS(2000), // Fast timeout for Vercel
+        .maxTimeMS(2000),
       
       // Load existing ShiftAttendance records for next day (for night shift checkOut)
       ShiftAttendance.find({ date: nextDateStr })
+        .select('date empCode checkIn checkOut shift')
         .lean()
-        .maxTimeMS(2000), // Fast timeout for Vercel
+        .maxTimeMS(2000),
     ]);
 
     // Build shift code to shift object map for quick lookup
@@ -432,17 +436,16 @@ export async function POST(req) {
       }
     }
 
-    // Fetch all successful access events in the business day window
-    // Window: 09:00 (business date) -> 08:00 (next day)
-    // This matches the sync service's business day window to ensure all events are captured
-    // Sync service: getBusinessRange() fetches 09:00 -> 08:00 next day
+    // OPTIMIZATION: Fetch events with minimal fields
+    // MongoDB will auto-select best index for eventTime range query
     const events = await AttendanceEvent.find({
       eventTime: { $gte: startLocal, $lte: endLocal },
       minor: 38, // "valid access" events only
     })
-    .sort({ eventTime: 1 }) // Sort by time ascending for proper processing
-    .lean()
-    .maxTimeMS(5000); // Daily events can be large, allow 5 seconds
+      .select('eventTime empCode') // Only select required fields
+      .sort({ eventTime: 1 }) // Sort by time ascending for proper processing
+      .lean()
+      .maxTimeMS(4000); // Reduced timeout
 
 
     // PERFORMANCE: Pre-fetch all next day events for night shift employees in a single batch query
@@ -461,16 +464,18 @@ export async function POST(req) {
       }
     }
     
-    // Batch query: fetch all next day events for all night shift employees at once
+    // OPTIMIZATION: Batch query with minimal fields
+    // MongoDB will auto-select best index for empCode + eventTime query
     const allNextDayEvents = nightShiftEmpCodes.size > 0
       ? await AttendanceEvent.find({
           empCode: { $in: Array.from(nightShiftEmpCodes) },
           eventTime: { $gte: nextDayStartLocal, $lte: nextDayEndLocal },
           minor: 38, // "valid access" events only
         })
+          .select('eventTime empCode') // Only select required fields
           .sort({ empCode: 1, eventTime: 1 })
           .lean()
-          .maxTimeMS(3000) // Fast timeout for Vercel
+          .maxTimeMS(2500) // Reduced timeout
       : [];
     
     // Build map: empCode -> array of next day events (sorted by time)
@@ -900,8 +905,12 @@ export async function POST(req) {
       },
     }));
 
+    // OPTIMIZATION: Use ordered: false for parallel execution, faster performance
     if (bulkOps.length > 0) {
-      await ShiftAttendance.bulkWrite(bulkOps);
+      await ShiftAttendance.bulkWrite(bulkOps, { 
+        ordered: false, // Allow parallel execution for better performance
+        maxTimeMS: 5000 // Timeout for bulk operations
+      });
     }
 
     // Sort output: department already handled on UI,

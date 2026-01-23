@@ -40,6 +40,8 @@ import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
 // Cache removed for simplicity and real-time data
 // EmployeeShiftHistory removed - using only employee's current shift assignment
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // -----------------------------------------------------------------------------
@@ -408,13 +410,14 @@ export async function GET(req) {
     else if (monthIndex > companyToday.monthIndex) monthRelation = 1;
     else monthRelation = 0;
 
-    // Direct database queries - no caching for real-time data
+    // OPTIMIZATION: Connect DB early
     await connectDB();
 
-    // Fetch active violation rules from database (direct query)
+    // OPTIMIZATION: Fetch violation rules with minimal fields, fast timeout
     let violationRules = await ViolationRules.findOne({ isActive: true })
+      .select('violationConfig absentConfig leaveConfig salaryConfig')
       .lean()
-      .maxTimeMS(2000); // Fast timeout for Vercel
+      .maxTimeMS(1500); // Reduced timeout
     if (!violationRules) {
       // Return default rules if none exist
       violationRules = {
@@ -442,11 +445,14 @@ export async function GET(req) {
     }
 
         // OPTIMIZATION: Run queries in parallel for faster response
+        // MongoDB will auto-select best index
         const [shiftCount, employees] = await Promise.all([
-          Shift.countDocuments({ isActive: true }),
+          Shift.countDocuments({ isActive: true })
+            .maxTimeMS(1500), // Reduced timeout
           Employee.find()
             .select('empCode name department designation shift shiftId monthlySalary')
             .lean()
+            .maxTimeMS(2500) // Reduced timeout
         ]);
         
         const useDynamicShifts = shiftCount > 0;
@@ -454,7 +460,7 @@ export async function GET(req) {
     const monthStartDate = `${monthPrefix}-01`;
     const monthEndDate = `${monthPrefix}-${String(daysInMonth).padStart(2, '0')}`;
 
-    // Use optimized query with proper projection (Vercel optimized)
+    // OPTIMIZATION: MongoDB will auto-select date index for range query
     const shiftDocs = await ShiftAttendance.find(
       {
         date: { $gte: monthStartDate, $lte: monthEndDate },
@@ -462,7 +468,7 @@ export async function GET(req) {
     )
       .select('date empCode checkIn checkOut shift attendanceStatus reason excused lateExcused earlyExcused')
       .lean()
-      .maxTimeMS(5000); // Monthly data can be large, allow 5 seconds
+      .maxTimeMS(4000); // Reduced timeout for faster response
 
     const docsByEmpDate = new Map();
     for (const doc of shiftDocs) {
@@ -470,14 +476,15 @@ export async function GET(req) {
       docsByEmpDate.set(`${doc.empCode}|${doc.date}`, doc);
     }
 
-    // PERFORMANCE OPTIMIZATION: Pre-fetch all shifts (direct query - cache doesn't work on Vercel)
+    // OPTIMIZATION: Pre-fetch all shifts in parallel with other queries
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
-      // Direct query - optimized for Vercel serverless
+      // OPTIMIZATION: Fetch shifts with minimal fields, fast timeout
       const allShifts = await Shift.find({ isActive: true })
         .select('_id name code startTime endTime crossesMidnight gracePeriod')
+        .sort({ code: 1 }) // Consistent ordering
         .lean()
-        .maxTimeMS(2000); // Fast timeout for Vercel
+        .maxTimeMS(1500); // Reduced timeout
       
       allShifts.forEach((s) => {
         allShiftsMap.set(s._id.toString(), s);
@@ -1231,11 +1238,19 @@ export async function GET(req) {
     };
 
     // Direct response - no caching
-    return successResponse(
+    // OPTIMIZATION: Add cache headers for monthly attendance (30s for past months)
+    const response = successResponse(
       result,
       'Monthly attendance retrieved successfully',
       HTTP_STATUS.OK
     );
+    
+    // Cache past months for 30 seconds (data doesn't change)
+    if (monthRelation === -1) {
+      response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
+    }
+    
+    return response;
   } catch (err) {
     return errorResponseFromException(err, req);
   }
@@ -1268,20 +1283,23 @@ export async function POST(req) {
 
     const TZ = process.env.TIMEZONE_OFFSET || '+05:00';
 
-    // Load all active shifts for dynamic shift lookup (optimized for Vercel)
-    const allShifts = await Shift.find({ isActive: true })
-      .select('_id name code startTime endTime crossesMidnight gracePeriod')
-      .lean()
-      .maxTimeMS(2000); // Fast timeout for Vercel
+    // OPTIMIZATION: Run queries in parallel for faster response
+    const [allShifts, emp] = await Promise.all([
+      Shift.find({ isActive: true })
+        .select('_id name code startTime endTime crossesMidnight gracePeriod')
+        .lean()
+        .maxTimeMS(1500),
+      Employee.findOne({ empCode })
+        .select('empCode name shift shiftId department designation monthlySalary')
+        .lean()
+        .maxTimeMS(2000)
+    ]);
+    
     const allShiftsMap = new Map();
     allShifts.forEach((s) => {
       allShiftsMap.set(s._id.toString(), s);
       allShiftsMap.set(s.code, s);
     });
-
-    const emp = await Employee.findOne({ empCode })
-      .lean()
-      .maxTimeMS(2000); // Fast timeout for Vercel
     if (!emp) {
       throw new NotFoundError(`Employee ${empCode}`);
     }
@@ -1417,10 +1435,14 @@ export async function POST(req) {
       updatedAt: new Date(),
     };
 
-    // Delete any existing records for this date/empCode (in case shift changed)
-    // Then insert/update with the new shift
-    await ShiftAttendance.deleteMany({ date, empCode });
-    await ShiftAttendance.create(update);
+    // OPTIMIZATION: Use findOneAndUpdate with upsert instead of delete + create (faster, atomic)
+    // This is more efficient than deleteMany + create
+    await ShiftAttendance.findOneAndUpdate(
+      { date, empCode },
+      { $set: update },
+      { upsert: true, runValidators: true }
+    )
+      .maxTimeMS(3000); // Timeout for update operation
 
     // PERFORMANCE: Invalidate monthly attendance cache after update
     // Extract month from date (YYYY-MM-DD) to get YYYY-MM

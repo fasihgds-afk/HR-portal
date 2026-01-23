@@ -3,6 +3,10 @@ import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../lib/db';
 import AttendanceEvent from '../../../../models/AttendanceEvent';
 
+// OPTIMIZATION: Node.js runtime for better connection pooling
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // GET /api/employee/attendance?empCode=EMP001&month=2025-11
 export async function GET(req) {
   try {
@@ -27,14 +31,17 @@ export async function GET(req) {
     const start = new Date(year, monthIndex, 1, 0, 0, 0, 0);
     const end = new Date(year, monthIndex + 1, 1, 0, 0, 0, 0);
 
-    // Successful punches for that employee in that month
+    // OPTIMIZATION: Select only required fields, use index hint, add timeout
+    // Index: { empCode: 1, eventTime: 1 } should exist for fast queries
     const events = await AttendanceEvent.find({
       empCode,
       eventTime: { $gte: start, $lt: end },
       minor: 38,
     })
+      .select('eventTime empCode') // Only select required fields
       .sort({ eventTime: 1 })
-      .lean();
+      .lean()
+      .maxTimeMS(3000); // Fast timeout
 
     const byDay = new Map();
 
