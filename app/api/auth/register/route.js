@@ -1,12 +1,12 @@
 // next-app/app/api/auth/register/route.js
-import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/db';
-import User from '@/models/User';
-import Employee from '@/models/Employee';
+import { connectDB } from '../../../lib/db';
+import User from '../../../models/User';
+import Employee from '../../../models/Employee';
 import bcrypt from 'bcryptjs';
-import { asyncHandler, ValidationError, NotFoundError } from '@/lib/errors/errorHandler';
-import { rateLimiters } from '@/lib/middleware/rateLimit';
+import { ValidationError, NotFoundError } from '../../../lib/errors/errorHandler';
+import { rateLimiters } from '../../../lib/middleware/rateLimit';
 import { z } from 'zod';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../lib/api/response';
 
 // Validation schema for user registration
 const registerSchema = z.object({
@@ -34,10 +34,15 @@ export async function POST(req) {
       validated = registerSchema.parse(body);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        throw new ValidationError('Validation failed', error.errors.map(e => ({
-          field: e.path.join('.'),
-          message: e.message,
-        })));
+        // Safely handle errors array - ensure it exists and is an array
+        const errors = (error.errors && Array.isArray(error.errors)) 
+          ? error.errors.map(e => ({
+              field: Array.isArray(e.path) ? e.path.join('.') : String(e.path || ''),
+              message: e.message || 'Validation error',
+            }))
+          : [{ field: 'unknown', message: 'Validation failed' }];
+        
+        throw new ValidationError('Validation failed', errors);
       }
       throw error;
     }
@@ -50,25 +55,19 @@ export async function POST(req) {
     let employeeDoc = null;
     if (role === 'EMPLOYEE') {
       if (!empCode) {
-        return NextResponse.json(
-          { error: 'empCode is required for EMPLOYEE role' },
-          { status: 400 }
-        );
+        throw new ValidationError('empCode is required for EMPLOYEE role');
       }
 
-      employeeDoc = await Employee.findOne({ empCode });
+      employeeDoc = await Employee.findOne({ empCode }).lean();
       if (!employeeDoc) {
         throw new NotFoundError(`Employee with empCode ${empCode}`);
       }
     }
 
     // Check if email already exists
-    const existing = await User.findOne({ email });
+    const existing = await User.findOne({ email }).lean();
     if (existing) {
-      return NextResponse.json(
-        { error: 'User with this email already exists' },
-        { status: 409 }
-      );
+      throw new ValidationError('User with this email already exists');
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -80,16 +79,15 @@ export async function POST(req) {
       employeeEmpCode: role === 'EMPLOYEE' ? employeeDoc.empCode : undefined,
     });
 
-    return NextResponse.json(
+    return successResponse(
       {
-        message: 'User registered successfully',
         userId: newUser._id,
         role: newUser.role,
       },
-      { status: 201 }
+      'User registered successfully',
+      HTTP_STATUS.CREATED
     );
   } catch (err) {
-    const { handleError } = await import('@/lib/errors/errorHandler');
-    return handleError(err, req);
+    return errorResponseFromException(err, req);
   }
 }

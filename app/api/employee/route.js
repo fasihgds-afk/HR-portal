@@ -1,10 +1,10 @@
 // next-app/app/api/employee/route.js
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../lib/db';
 import Employee from '../../../models/Employee';
 import { buildEmployeeFilter, getEmployeeProjection } from '../../../lib/db/queryOptimizer';
 import { NotFoundError, ValidationError } from '../../../lib/errors/errorHandler';
 import { validateEmployee } from '../../../lib/validations/employee';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../lib/api/response';
 
 // SIMPLE APPROACH - No caching, no wrappers, no monitoring - just direct Mongoose queries with .lean()
 export const dynamic = 'force-dynamic';
@@ -41,19 +41,12 @@ async function normalizeShiftField(shiftValue) {
 // - /api/employee                  -> list { items: [...] }
 export async function GET(req) {
   try {
-    // Log all requests for debugging (including production)
-    console.log('[Employee API] GET request received:', {
-      url: req.url,
-      timestamp: new Date().toISOString(),
-      env: process.env.NODE_ENV,
-    });
-
     await connectDB();
 
     const { searchParams } = new URL(req.url);
     const empCode = searchParams.get('empCode');
     
-    console.log('[Employee API] Query params:', { empCode, searchParams: Object.fromEntries(searchParams) });
+    // Employee API Query params
 
     // If empCode is provided → return single employee (used by employee dashboard)
     if (empCode) {
@@ -72,7 +65,11 @@ export async function GET(req) {
         employee.shift = await normalizeShiftField(employee.shift);
       }
       
-      return NextResponse.json({ employee });
+      return successResponse(
+        { employee },
+        'Employee retrieved successfully',
+        HTTP_STATUS.OK
+      );
     }
 
     // Otherwise → return list with pagination (used by admin/HR UI)
@@ -103,45 +100,99 @@ export async function GET(req) {
     // Get projection from helper (consistent with other queries)
     const listProjection = getEmployeeProjection(false);
     
-    // Execute queries sequentially to avoid any issues
-    const employees = await Employee.find(queryFilter)
-      .select(listProjection)
-      .sort(sortOptions || { empCode: 1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
-      .exec(); // Explicitly execute the query
+    // OPTIMIZATION: Run find and countDocuments in parallel for faster response
+    // Also add maxTimeMS to prevent slow queries from hanging
+    const [employees, total] = await Promise.all([
+      Employee.find(queryFilter)
+        .select(listProjection)
+        .sort(sortOptions || { empCode: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .maxTimeMS(5000) // Timeout after 5 seconds
+        .exec(),
+      Employee.countDocuments(queryFilter)
+        .maxTimeMS(5000) // Timeout after 5 seconds
+        .exec()
+    ]);
     
-    const total = await Employee.countDocuments(queryFilter).exec();
+    // OPTIMIZATION: Batch shift lookups instead of sequential queries (N+1 problem fix)
+    // Collect all unique shift ObjectIds that need to be resolved
+    const shiftObjectIds = new Set();
+    const shiftMap = new Map(); // Map ObjectId -> shift code
     
-    // Normalize shift field for all employees: convert ObjectId to shift code if needed
-    // This ensures the frontend always receives shift codes, not ObjectIds
     for (const emp of employees) {
       if (emp.shift) {
-        emp.shift = await normalizeShiftField(emp.shift);
+        const shiftString = String(emp.shift).trim();
+        // Check if it's an ObjectId (24 hex characters)
+        if (/^[0-9a-fA-F]{24}$/.test(shiftString)) {
+          shiftObjectIds.add(shiftString);
+        }
+      }
+    }
+    
+    // OPTIMIZATION: Batch fetch all shifts in one query (use cached shifts if available)
+    if (shiftObjectIds.size > 0) {
+      const { getCachedShifts } = await import('../../../lib/cache/shiftCache');
+      let allCachedShifts = getCachedShifts(false); // Get all shifts from cache
+      
+      if (allCachedShifts) {
+        // Use cached shifts - filter to only the ones we need
+        const neededShifts = allCachedShifts.filter(s => 
+          shiftObjectIds.has(s._id.toString())
+        );
+        for (const shift of neededShifts) {
+          shiftMap.set(shift._id.toString(), shift.code);
+        }
+      } else {
+        // Cache miss - fetch from database
+        const Shift = (await import('../../../models/Shift')).default;
+        const shifts = await Shift.find({ 
+          _id: { $in: Array.from(shiftObjectIds) } 
+        })
+          .select('_id code')
+          .lean();
+        
+        // Build map for fast lookup
+        for (const shift of shifts) {
+          shiftMap.set(shift._id.toString(), shift.code);
+        }
+      }
+    }
+    
+    // Now normalize shift fields using the pre-fetched map
+    for (const emp of employees) {
+      if (emp.shift) {
+        const shiftString = String(emp.shift).trim();
+        if (/^[0-9a-fA-F]{24}$/.test(shiftString)) {
+          // It's an ObjectId - use the map
+          emp.shift = shiftMap.get(shiftString) || '';
+        } else {
+          // It's already a code - normalize to uppercase
+          emp.shift = shiftString.toUpperCase();
+        }
       }
     }
     
     if (process.env.NODE_ENV === 'development') {
-      console.log('[Employee API] Query result:', { count: employees.length, total });
+      // Employee API Query result
     }
 
-    return NextResponse.json({
-      items: employees || [],
-      pagination: {
-        page,
-        limit,
-        total: total || 0,
-        totalPages: Math.ceil((total || 0) / limit),
-      },
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-      },
-    });
+    return successResponse(
+      { items: employees || [] },
+      'Employees retrieved successfully',
+      HTTP_STATUS.OK,
+      {
+        pagination: {
+          page,
+          limit,
+          total: total || 0,
+          totalPages: Math.ceil((total || 0) / limit),
+        },
+      }
+    );
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    return errorResponseFromException(err, req);
   }
 }
 
@@ -218,10 +269,15 @@ export async function POST(req) {
       { new: true, upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
-    return NextResponse.json({ employee });
+    const isNew = !employee.createdAt || new Date(employee.createdAt).getTime() > Date.now() - 1000;
+    
+    return successResponse(
+      { employee },
+      isNew ? 'Employee created successfully' : 'Employee updated successfully',
+      isNew ? HTTP_STATUS.CREATED : HTTP_STATUS.OK
+    );
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    return errorResponseFromException(err, req);
   }
 }
 
@@ -243,13 +299,12 @@ export async function DELETE(req) {
       throw new NotFoundError(`Employee ${empCode}`);
     }
 
-    return NextResponse.json({
-      success: true,
-      message: `Employee ${empCode} deleted successfully`,
-      employee: deleted,
-    });
+    return successResponse(
+      { employee: deleted },
+      `Employee ${empCode} deleted successfully`,
+      HTTP_STATUS.OK
+    );
   } catch (err) {
-    const { handleError } = await import('../../../lib/errors/errorHandler');
-    return handleError(err, req);
+    return errorResponseFromException(err, req);
   }
 }

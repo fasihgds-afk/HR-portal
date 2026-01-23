@@ -1,28 +1,46 @@
 // app/api/hr/shifts/route.js
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../lib/db';
 import Shift from '../../../../models/Shift';
+import { getCachedShifts, setCachedShifts, invalidateShiftsCache } from '../../../../lib/cache/shiftCache';
+import { successResponse, errorResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
+import { ValidationError } from '../../../../lib/errors/errorHandler';
 
 export const dynamic = 'force-dynamic';
 
 // GET /api/hr/shifts - Get all shifts
 export async function GET(req) {
   try {
-    await connectDB();
-
     const { searchParams } = new URL(req.url);
     const activeOnly = searchParams.get('activeOnly') === 'true';
 
-    const query = activeOnly ? { isActive: true } : {};
-    const shifts = await Shift.find(query).sort({ code: 1 }).lean();
+    // OPTIMIZATION: Use cache for shifts (static data, rarely changes)
+    // Cache is invalidated on any CRUD operation, so data stays fresh
+    let shifts = getCachedShifts(activeOnly);
+    
+    if (!shifts) {
+      await connectDB();
+      
+      const query = activeOnly ? { isActive: true } : {};
+      shifts = await Shift.find(query).sort({ code: 1 }).lean();
+      
+      // Cache all shifts (we'll filter activeOnly from cache if needed)
+      if (!activeOnly) {
+        setCachedShifts(shifts);
+      } else {
+        // If activeOnly was requested, cache all shifts anyway for future use
+        const allShifts = await Shift.find({}).sort({ code: 1 }).lean();
+        setCachedShifts(allShifts);
+        shifts = allShifts.filter(s => s.isActive);
+      }
+    }
 
-    return NextResponse.json({ shifts });
-  } catch (err) {
-    console.error('GET /api/hr/shifts error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    return successResponse(
+      { shifts },
+      'Shifts retrieved successfully',
+      HTTP_STATUS.OK
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
 
@@ -67,19 +85,13 @@ export async function POST(req) {
     const { name, code, startTime, endTime, crossesMidnight, gracePeriod, description } = body;
 
     if (!name || !code || !startTime || !endTime) {
-      return NextResponse.json(
-        { error: 'name, code, startTime, and endTime are required' },
-        { status: 400 }
-      );
+      throw new ValidationError('name, code, startTime, and endTime are required');
     }
 
     // Validate time format (HH:mm)
     const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
     if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
-      return NextResponse.json(
-        { error: 'startTime and endTime must be in HH:mm format' },
-        { status: 400 }
-      );
+      throw new ValidationError('startTime and endTime must be in HH:mm format');
     }
 
     const shift = await Shift.create({
@@ -93,19 +105,16 @@ export async function POST(req) {
       isActive: true,
     });
 
-    return NextResponse.json({ shift }, { status: 201 });
-  } catch (err) {
-    console.error('POST /api/hr/shifts error:', err);
-    if (err.code === 11000) {
-      return NextResponse.json(
-        { error: 'Shift with this name or code already exists' },
-        { status: 400 }
-      );
-    }
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    // Invalidate cache after creating shift
+    invalidateShiftsCache();
+
+    return successResponse(
+      { shift },
+      'Shift created successfully',
+      HTTP_STATUS.CREATED
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
 

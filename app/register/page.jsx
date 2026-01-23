@@ -1,13 +1,15 @@
 // next-app/app/register/page.jsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
   const { colors, theme } = useTheme();
 
   const [email, setEmail] = useState('');
@@ -23,6 +25,43 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Block access if user is not authenticated
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      // User is not logged in, redirect to login page
+      router.push('/login?role=hr');
+    } else if (status === 'authenticated') {
+      // Optional: Only allow HR or ADMIN roles to access register page
+      // Uncomment the following lines if you want to restrict to HR/ADMIN only:
+      // if (session?.user?.role !== 'HR' && session?.user?.role !== 'ADMIN') {
+      //   router.push('/login?role=hr');
+      // }
+    }
+  }, [status, session, router]);
+
+  // Show loading state while checking authentication
+  if (status === 'loading') {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          background: colors.gradient.overlay,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: colors.text.primary,
+        }}
+      >
+        <div style={{ fontSize: 14, color: colors.text.muted }}>Loading...</div>
+      </div>
+    );
+  }
+
+  // Don't render the form if not authenticated (will redirect)
+  if (status === 'unauthenticated') {
+    return null;
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();

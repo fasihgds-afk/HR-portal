@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../lib/db';
 import ViolationRules from '../../../../models/ViolationRules';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
+import { ValidationError } from '../../../../lib/errors/errorHandler';
 // Cache removed for simplicity and real-time data
 
 export const dynamic = 'force-dynamic';
@@ -191,15 +193,13 @@ export async function PUT(req) {
         updatedBy: updatedBy || 'HR',
       });
 
-      // Invalidate cache for violation rules and monthly attendance (which uses these rules)
-      invalidateCache('active-violation-rules');
-      invalidateCache('monthly-attendance');
+      // Cache removed - data is always fresh
 
-      return NextResponse.json({
-        success: true,
-        rules: newRules,
-        message: 'Violation rules created successfully',
-      });
+      return successResponse(
+        { rules: newRules },
+        'Violation rules created successfully',
+        HTTP_STATUS.OK
+      );
     }
 
     // Update active rules

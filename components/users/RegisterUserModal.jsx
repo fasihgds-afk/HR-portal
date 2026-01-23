@@ -31,8 +31,8 @@ export default function RegisterUserModal({ isOpen, onClose, onSuccess }) {
       return;
     }
 
-    if (password.length < 6) {
-      setErrorMsg('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setErrorMsg('Password must be at least 8 characters');
       return;
     }
 
@@ -43,21 +43,35 @@ export default function RegisterUserModal({ isOpen, onClose, onSuccess }) {
 
     setLoading(true);
     try {
+      // Build request body - only include empCode if role is EMPLOYEE
+      const requestBody = {
+        email: email.trim(),
+        password,
+        role,
+      };
+      
+      // Only include empCode if role is EMPLOYEE and empCode is provided
+      if (role === 'EMPLOYEE' && empCode.trim()) {
+        requestBody.empCode = empCode.trim();
+      }
+
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          role,
-          empCode: role === 'EMPLOYEE' ? empCode : undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setErrorMsg(data.error || 'Registration failed');
+        // Show detailed error message if available
+        let errorMessage = data.error || 'Registration failed';
+        if (data.details && Array.isArray(data.details) && data.details.length > 0) {
+          // Show first validation error detail
+          const firstError = data.details[0];
+          errorMessage = `${errorMessage}: ${firstError.field ? `${firstError.field}: ` : ''}${firstError.message || ''}`;
+        }
+        setErrorMsg(errorMessage);
         return;
       }
 
@@ -254,7 +268,7 @@ export default function RegisterUserModal({ isOpen, onClose, onSuccess }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                placeholder="Minimum 6 characters"
+                placeholder="Minimum 8 characters"
                 style={{
                   padding: '10px 14px 10px 14px',
                   paddingRight: '40px',

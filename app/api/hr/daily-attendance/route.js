@@ -1,6 +1,7 @@
 // next-app/app/api/hr/daily-attendance/route.js
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../lib/db';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
+import { ValidationError } from '../../../../lib/errors/errorHandler';
 import AttendanceEvent from '../../../../models/AttendanceEvent';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
@@ -83,10 +84,7 @@ export async function POST(req) {
     const date = searchParams.get('date'); // "YYYY-MM-DD"
 
     if (!date) {
-      return NextResponse.json(
-        { error: 'Missing "date" query parameter' },
-        { status: 400 }
-      );
+      throw new ValidationError('Missing "date" query parameter');
     }
 
     await connectDB();
@@ -94,13 +92,17 @@ export async function POST(req) {
     const TZ = process.env.TIMEZONE_OFFSET || '+05:00';
 
     // Load ALL active shifts from database (for dynamic classification)
-    const allShifts = await Shift.find({ isActive: true }).lean();
+    // OPTIMIZATION: Use cached shifts if available (shifts rarely change)
+    const { getCachedShifts } = await import('../../../../lib/cache/shiftCache');
+    let allShifts = getCachedShifts(true); // Get active shifts from cache
+    
+    if (!allShifts) {
+      allShifts = await Shift.find({ isActive: true }).lean();
+      // Cache will be set by shifts route, no need to set here
+    }
     
     if (allShifts.length === 0) {
-      return NextResponse.json(
-        { error: 'No active shifts found. Please create shifts first.' },
-        { status: 400 }
-      );
+      throw new ValidationError('No active shifts found. Please create shifts first.');
     }
 
     // Calculate next day date for night shift checkOut lookup
@@ -243,8 +245,6 @@ export async function POST(req) {
     // Window: 09:00 (business date) -> 08:00 (next day)
     // This matches the sync service's business day window to ensure all events are captured
     // Sync service: getBusinessRange() fetches 09:00 -> 08:00 next day
-    console.log(`📅 Fetching events for business day ${date} from ${startLocal.toISOString()} to ${endLocal.toISOString()}`);
-    
     const events = await AttendanceEvent.find({
       eventTime: { $gte: startLocal, $lte: endLocal },
       minor: 38, // "valid access" events only
@@ -252,7 +252,6 @@ export async function POST(req) {
     .sort({ eventTime: 1 }) // Sort by time ascending for proper processing
     .lean();
 
-    console.log(`📥 Found ${events.length} events in business day window for ${date}`);
 
     // PERFORMANCE: Pre-fetch all next day events for night shift employees in a single batch query
     // This eliminates N+1 query problem (previously querying per employee in loop)
@@ -291,7 +290,6 @@ export async function POST(req) {
       nextDayEventsByEmp.get(event.empCode).push(event);
     }
     
-    console.log(`🌙 Pre-fetched ${allNextDayEvents.length} next day events for ${nightShiftEmpCodes.size} night shift employees`);
 
     // Group punches by employee (only those who have events)
     const byEmp = new Map();
@@ -396,10 +394,7 @@ export async function POST(req) {
         // This prevents incorrect matching for day shifts
         const isNightShift = shiftObj?.crossesMidnight === true;
         
-        console.log(`[NIGHT SHIFT CHECK] empCode=${emp.empCode}, assignedShift=${empAssignedShift}, hasShiftObj=${!!shiftObj}, crossesMidnight=${shiftObj?.crossesMidnight}, isNightShift=${isNightShift}, checkIn=${checkIn?.toISOString()}, checkOut=${checkOut?.toISOString()}`);
-        
         if (isNightShift) {
-          console.log(`[NIGHT SHIFT] Processing night shift checkout retrieval for empCode=${emp.empCode}, shift=${empAssignedShift}, date=${date}`);
           // ====================================================================================
           // NIGHT SHIFT CHECKOUT RETRIEVAL FROM NEXT DAY
           // ====================================================================================
@@ -439,19 +434,12 @@ export async function POST(req) {
                 // Example: Jan 1 N2 checkIn at 21:00 → checkout on Jan 2 must be after Jan 1 21:00
                 if (potentialCheckOut > checkIn) {
                   nextDayCheckOut = potentialCheckOut;
-                  console.log(`[N1 DEBUG] Found checkout from nextDayRecord: empCode=${emp.empCode}, checkIn=${checkIn.toISOString()}, checkout=${potentialCheckOut.toISOString()}`);
-                } else {
-                  console.log(`[N1 DEBUG] Rejected nextDayRecord checkout (not after checkIn): empCode=${emp.empCode}, checkIn=${checkIn.toISOString()}, checkout=${potentialCheckOut.toISOString()}`);
                 }
               }
             } catch (e) {
-              console.log(`[N1 DEBUG] Error parsing nextDayRecord checkout: empCode=${emp.empCode}, error=${e.message}`);
               nextDayCheckOut = null;
             }
           } else {
-            if (isNightShift) {
-              console.log(`[N1 DEBUG] No nextDayRecord or checkIn: empCode=${emp.empCode}, hasNextDayRecord=${!!nextDayRecord}, hasCheckOut=${!!nextDayRecord?.checkOut}, hasCheckIn=${!!checkIn}`);
-            }
           }
           
           // If not found in ShiftAttendance, query AttendanceEvent directly for next day early morning
@@ -509,15 +497,12 @@ export async function POST(req) {
               // - Validation: eventTime (01:00 UTC Jan 3) > checkInTime (16:00 UTC Jan 2) ✅
               // - But if we find Jan 2 01:00 UTC event (from Jan 1 shift): 01:00 UTC Jan 2 < 16:00 UTC Jan 2 ❌ (rejected)
               if (nextDayEvents.length > 0) {
-                console.log(`[N1 DEBUG] Found ${nextDayEvents.length} events for next day: empCode=${emp.empCode}, checkIn=${checkIn.toISOString()}, date=${date}, nextDateStr=${nextDateStr}, queryRange=${nextDayStartLocal.toISOString()} to ${nextDayEndLocal.toISOString()}`);
                 const checkInTime = new Date(checkIn);
                 const checkInLocalDateStr = getLocalDateStr(checkIn, TZ);
                 
                 for (const event of nextDayEvents) {
                   const eventTime = new Date(event.eventTime);
                   const eventLocalDateStr = getLocalDateStr(eventTime, TZ);
-                  
-                  console.log(`[N1 DEBUG] Checking event: empCode=${emp.empCode}, eventTime=${eventTime.toISOString()}, eventLocalDate=${eventLocalDateStr}, checkInTime=${checkInTime.toISOString()}, checkInLocalDate=${checkInLocalDateStr}, date=${date}, nextDateStr=${nextDateStr}, isAfter=${eventTime > checkInTime}`);
                   
                   // CRITICAL VALIDATION:
                   // 1. Event must be on the next calendar day (nextDateStr), not current day
@@ -530,20 +515,11 @@ export async function POST(req) {
                   // - When viewing Jan 2: checkout from Jan 2 is rejected (nextDateStr = Jan 3, eventLocalDate = Jan 2 ≠ Jan 3)
                   if (eventLocalDateStr === nextDateStr && eventTime > checkInTime && checkInLocalDateStr === date) {
                     nextDayCheckOut = eventTime;
-                    console.log(`[N1 DEBUG] ACCEPTED event as checkout: empCode=${emp.empCode}, checkout=${eventTime.toISOString()}, eventLocalDate=${eventLocalDateStr}, nextDateStr=${nextDateStr}, checkInLocalDate=${checkInLocalDateStr}, date=${date}`);
                     break;
-                  } else {
-                    console.log(`[N1 DEBUG] REJECTED event: empCode=${emp.empCode}, eventTime=${eventTime.toISOString()}, eventLocalDate=${eventLocalDateStr}, nextDateStr=${nextDateStr}, checkInLocalDate=${checkInLocalDateStr}, date=${date}, eventTime>checkIn=${eventTime > checkInTime}, dateMatch=${checkInLocalDateStr === date}, nextDateMatch=${eventLocalDateStr === nextDateStr}`);
                   }
                 }
-                if (!nextDayCheckOut) {
-                  console.log(`[N1 DEBUG] No valid events found after checkIn time on next day: empCode=${emp.empCode}, checkIn=${checkIn.toISOString()}, date=${date}, nextDateStr=${nextDateStr}`);
-                }
-              } else {
-                console.log(`[N1 DEBUG] No events found for next day: empCode=${emp.empCode}, nextDateStr=${nextDateStr}, checkIn=${checkIn.toISOString()}, queryRange=${nextDayStartLocal.toISOString()} to ${nextDayEndLocal.toISOString()}`);
               }
             } catch (e) {
-              console.log(`[N1 DEBUG] Error querying next day events: empCode=${emp.empCode}, error=${e.message}`);
               // Ignore errors - will continue without checkOut
             }
           }
@@ -606,7 +582,6 @@ export async function POST(req) {
                 if (checkInDateStr !== date) {
                   // CheckIn is NOT on the business date - this checkout belongs to previous day's shift
                   // Example: Viewing Jan 1, but checkIn was Dec 31 - this checkout is from Dec 31's shift, not Jan 1's
-                  console.log(`[N1 DEBUG] Rejected checkout (checkIn date mismatch): empCode=${emp.empCode}, date=${date}, checkInDateStr=${checkInDateStr}, checkIn=${checkIn.toISOString()}, checkout=${nextDayCheckOut.toISOString()}`);
                   nextDayCheckOut = null;
                 } else {
                   // CheckIn is on the business date - validate checkout timing
@@ -638,22 +613,18 @@ export async function POST(req) {
                   
                   if (checkOutDateValue < expectedDateValue) {
                     // Checkout is before the expected next day - this belongs to a previous shift
-                    console.log(`[N1 DEBUG] Rejected checkout (before expected next day): empCode=${emp.empCode}, expectedDateStr=${expectedCheckOutDateStr}, checkOutDateStr=${checkOutDateStr}, checkout=${nextDayCheckOut.toISOString()}`);
                     nextDayCheckOut = null;
                   } else if (checkOutDateValue === expectedDateValue && checkOutTotalMin >= 480) {
                     // Checkout is on expected next day but after 08:00 - too late to be from previous night shift
-                    console.log(`[N1 DEBUG] Rejected checkout (after 08:00 on expected day): empCode=${emp.empCode}, checkOutTotalMin=${checkOutTotalMin}, checkout=${nextDayCheckOut.toISOString()}`);
                     nextDayCheckOut = null;
                   } else if (checkOutDateValue > expectedDateValue && checkOutTotalMin >= 480) {
                     // Checkout is on a later date and after 08:00 - this is likely from a future shift
                     // But if it's before 08:00, it could still be from the current shift (edge case: shift extends very late)
                     // For safety, we'll accept it if it's before 08:00 on the checkout date
-                    console.log(`[N1 DEBUG] Rejected checkout (on later date and after 08:00): empCode=${emp.empCode}, checkOutDateStr=${checkOutDateStr}, checkOutTotalMin=${checkOutTotalMin}, checkout=${nextDayCheckOut.toISOString()}`);
                     nextDayCheckOut = null;
                   } else {
                     // Checkout is on or after expected next day, and timing is valid
                     // This checkout belongs to current day's night shift (N1 ends at 03:00, N2 ends at 06:00)
-                    console.log(`[N1 DEBUG] ACCEPTED checkout: empCode=${emp.empCode}, date=${date}, checkIn=${checkIn.toISOString()}, checkout=${nextDayCheckOut.toISOString()}, checkOutDateStr=${checkOutDateStr}, expectedDateStr=${expectedCheckOutDateStr}`);
                     checkOut = nextDayCheckOut;
                   }
                 }
@@ -691,21 +662,6 @@ export async function POST(req) {
         shift = Array.from(rec.detectedShifts)[0];
       }
       
-      // Debug logging for employee 00002 to diagnose "Unknown" issue
-      if (emp.empCode === '00002') {
-        console.log(`[DAILY ATTENDANCE DEBUG] Employee 00002:`, {
-          empShiftRaw: empShiftRaw,
-          empShiftType: typeof empShiftRaw,
-          recAssignedShift: rec?.assignedShift,
-          extractedShift: assignedShift,
-          shiftByCodeHas: shiftByCode.has(assignedShift),
-          detectedShifts: rec?.detectedShifts ? Array.from(rec.detectedShifts) : [],
-          finalShift: shift,
-          allShiftCodes: Array.from(shiftByCode.keys()),
-          hasRec: !!rec,
-          empInfoMapShift: empInfoMap.get(emp.empCode)?.shift,
-        });
-      }
 
       // Calculate total punches: count events found, but also count checkOut if it exists from existing record or next day's record
       let totalPunches = times.length;
@@ -780,17 +736,17 @@ export async function POST(req) {
       return String(a.empCode).localeCompare(String(b.empCode));
     });
 
-    return NextResponse.json({
-      date,
-      savedCount: presentItems.length,
-      items,
-    });
-  } catch (err) {
-    console.error('HR daily-attendance error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    return successResponse(
+      {
+        date,
+        savedCount: presentItems.length,
+        items,
+      },
+      'Daily attendance saved successfully',
+      HTTP_STATUS.OK
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
 

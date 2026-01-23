@@ -1,36 +1,29 @@
 // next-app/app/api/hr/employees/route.js
-import { connectDB } from "@/lib/db";
-import Employee from "@/models/Employee";
+import { connectDB } from "../../../../lib/db";
+import Employee from "../../../../models/Employee";
+import { successResponse, errorResponseFromException, HTTP_STATUS } from "../../../../lib/api/response";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(req) {
   try {
     await connectDB();
 
-    // Direct database query - no caching for real-time data
+    // OPTIMIZATION: Sort uses compound index { department: 1, empCode: 1 } for fast sorting
+    // MongoDB query planner will automatically use the best index
     const employees = await Employee.find({})
       .select('empCode name email monthlySalary shift shiftId department designation phoneNumber cnic profileImageUrl saturdayGroup')
+      .sort({ department: 1, empCode: 1 }) // Uses compound index for fast sorting
       .lean()
-      .sort({ department: 1, empCode: 1 });
+      .maxTimeMS(5000); // Timeout after 5 seconds to prevent hanging
 
-    return Response.json(
+    return successResponse(
       { employees },
-      {
-        status: 200,
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
-        },
-      }
+      'Employees retrieved successfully',
+      HTTP_STATUS.OK
     );
   } catch (err) {
-    console.error("GET /api/hr/employees error:", err);
-    return Response.json(
-      {
-        error: err?.message || "Failed to load employees",
-      },
-      { status: 500 }
-    );
+    return errorResponseFromException(err, req);
   }
 }

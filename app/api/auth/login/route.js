@@ -1,9 +1,10 @@
 // next-app/app/api/auth/login/route.js
-import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/db';   // ✅
-import User from '@/models/User';
-import Employee from '@/models/Employee';
+import { connectDB } from '../../../lib/db';
+import User from '../../../models/User';
+import Employee from '../../../models/Employee';
 import bcrypt from 'bcryptjs';
+import { successResponse, errorResponse, errorResponseFromException, HTTP_STATUS } from '../../../lib/api/response';
+import { ValidationError, UnauthorizedError } from '../../../lib/errors/errorHandler';
 
 export async function POST(req) {
   try {
@@ -13,61 +14,47 @@ export async function POST(req) {
     const { role, email, password, empCode, cnic } = body;
 
     if (!role) {
-      return NextResponse.json({ error: 'role is required' }, { status: 400 });
+      throw new ValidationError('role is required');
     }
 
     // HR login
     if (role === 'HR') {
       if (!email || !password) {
-        return NextResponse.json(
-          { error: 'email and password are required for HR login' },
-          { status: 400 }
-        );
+        throw new ValidationError('email and password are required for HR login');
       }
 
-      const user = await User.findOne({ email, role: 'HR' });
+      const user = await User.findOne({ email, role: 'HR' }).lean();
       if (!user) {
-        return NextResponse.json(
-          { error: 'Invalid HR credentials' },
-          { status: 401 }
-        );
+        throw new UnauthorizedError('Invalid HR credentials');
       }
 
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) {
-        return NextResponse.json(
-          { error: 'Invalid HR credentials' },
-          { status: 401 }
-        );
+        throw new UnauthorizedError('Invalid HR credentials');
       }
 
-      return NextResponse.json(
-        { message: 'HR login ok', role: 'HR' },
-        { status: 200 }
+      return successResponse(
+        { role: 'HR' },
+        'HR login successful',
+        HTTP_STATUS.OK
       );
     }
 
     // Employee login
     if (role === 'EMPLOYEE') {
       if (!empCode || !cnic) {
-        return NextResponse.json(
-          { error: 'empCode and cnic are required for employee login' },
-          { status: 400 }
-        );
+        throw new ValidationError('empCode and cnic are required for employee login');
       }
 
-      const employee = await Employee.findOne({ empCode, cnic });
+      const employee = await Employee.findOne({ empCode, cnic }).lean();
       if (!employee) {
-        return NextResponse.json(
-          { error: 'Employee not found for given code + CNIC' },
-          { status: 401 }
-        );
+        throw new UnauthorizedError('Employee not found for given code + CNIC');
       }
 
       let user = await User.findOne({
         role: 'EMPLOYEE',
         employeeEmpCode: empCode,
-      });
+      }).lean();
 
       // Optionally auto-create a User row once employee is verified
       if (!user) {
@@ -79,23 +66,19 @@ export async function POST(req) {
         });
       }
 
-      return NextResponse.json(
+      return successResponse(
         {
-          message: 'Employee login ok',
           role: 'EMPLOYEE',
           empCode: employee.empCode,
           name: employee.name,
         },
-        { status: 200 }
+        'Employee login successful',
+        HTTP_STATUS.OK
       );
     }
 
-    return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    throw new ValidationError('Invalid role');
   } catch (err) {
-    console.error('[LOGIN ERROR]', err);
-    return NextResponse.json(
-      { error: 'Server error while logging in' },
-      { status: 500 }
-    );
+    return errorResponseFromException(err, req);
   }
 }

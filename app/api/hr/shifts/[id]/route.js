@@ -1,7 +1,8 @@
 // app/api/hr/shifts/[id]/route.js
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../../lib/db';
 import Shift from '../../../../../models/Shift';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../../lib/api/response';
+import { NotFoundError, ValidationError } from '../../../../../lib/errors/errorHandler';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export async function PUT(req, { params }) {
     // Handle both Next.js 14 and 15 (params might be a promise in Next.js 15)
     const resolvedParams = params instanceof Promise ? await params : params;
     const { id } = resolvedParams;
-    console.log('PUT /api/hr/shifts/[id] - Updating shift:', id);
+    // Updating shift
 
     if (!id) {
       return NextResponse.json(
@@ -86,7 +87,11 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
     }
 
-    console.log('Shift updated successfully:', shift._id);
+    // CRITICAL: Invalidate cache after update to ensure fresh data
+    const { invalidateShiftsCache } = await import('../../../../../lib/cache/shiftCache');
+    invalidateShiftsCache();
+
+    // Shift updated successfully
     return NextResponse.json({ shift });
   } catch (err) {
     console.error('PUT /api/hr/shifts/[id] error:', err);
@@ -123,15 +128,25 @@ export async function DELETE(req, { params }) {
     const { searchParams } = new URL(req.url);
     const permanent = searchParams.get('permanent') === 'true';
 
+    // CRITICAL: Import cache invalidation function
+    const { invalidateShiftsCache } = await import('../../../../../lib/cache/shiftCache');
+    
     if (permanent) {
       // Permanent deletion - remove from database
       const shift = await Shift.findByIdAndDelete(id).lean();
 
       if (!shift) {
-        return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+        throw new NotFoundError('Shift');
       }
 
-      return NextResponse.json({ message: 'Shift permanently deleted successfully' });
+      // CRITICAL: Invalidate cache after delete
+      invalidateShiftsCache();
+
+      return successResponse(
+        { shift },
+        'Shift permanently deleted successfully',
+        HTTP_STATUS.OK
+      );
     } else {
       // Soft delete - set isActive to false
       const shift = await Shift.findByIdAndUpdate(
@@ -141,17 +156,20 @@ export async function DELETE(req, { params }) {
       ).lean();
 
       if (!shift) {
-        return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+        throw new NotFoundError('Shift');
       }
 
-      return NextResponse.json({ shift, message: 'Shift deactivated successfully' });
+      // CRITICAL: Invalidate cache after update
+      invalidateShiftsCache();
+
+      return successResponse(
+        { shift },
+        'Shift deactivated successfully',
+        HTTP_STATUS.OK
+      );
     }
   } catch (err) {
-    console.error('DELETE /api/hr/shifts/[id] error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return errorResponseFromException(err, req);
   }
 }
 

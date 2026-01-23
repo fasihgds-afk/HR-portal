@@ -1,8 +1,9 @@
 // app/api/hr/shifts/migrate/route.js
 // Migration script to create default shifts from hardcoded values
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../../lib/db';
 import Shift from '../../../../../models/Shift';
+import { invalidateShiftsCache } from '../../../../../lib/cache/shiftCache';
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../../lib/api/response';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,16 +83,16 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json({
-      message: 'Migration completed',
-      results,
-    });
-  } catch (err) {
-    console.error('POST /api/hr/shifts/migrate error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    // CRITICAL: Invalidate cache after migration (creates/updates shifts)
+    invalidateShiftsCache();
+
+    return successResponse(
+      { results },
+      'Migration completed',
+      HTTP_STATUS.OK
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
 

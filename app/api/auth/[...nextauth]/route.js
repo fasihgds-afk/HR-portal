@@ -1,9 +1,9 @@
 // app/api/auth/[...nextauth]/route.js
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { connectDB } from "@/lib/db";
-import User from "@/models/User";
-import Employee from "@/models/Employee";
+import { connectDB } from "../../../lib/db";
+import User from "../../../models/User";
+import Employee from "../../../models/Employee";
 import bcrypt from "bcryptjs";
 
 export const authOptions = {
@@ -25,8 +25,7 @@ export const authOptions = {
         const startTime = Date.now();
         
         try {
-          // Optimize: Check if connection already exists before calling connectDB
-          // This avoids unnecessary connection attempts if already connected
+          // OPTIMIZATION: Fast connection check - connectDB() now has fast path for existing connections
           await connectDB();
         } catch (error) {
           console.error('[NextAuth] Database connection error:', error);
@@ -48,23 +47,20 @@ export const authOptions = {
               .maxTimeMS(2000); // Reduced to 2 seconds for faster failure
               
             if (!user || !["HR", "ADMIN"].includes(user.role)) {
-              console.log(
-                "[NextAuth] HR/ADMIN user not found or invalid role",
-                email
-              );
+              // NextAuth HR/ADMIN user not found or invalid role
               return null;
             }
 
             // Bcrypt comparison is intentionally slow for security (100-500ms)
             const ok = await bcrypt.compare(password, user.passwordHash);
             if (!ok) {
-              console.log("[NextAuth] HR/ADMIN invalid password", email);
+              // NextAuth HR/ADMIN invalid password
               return null;
             }
 
             const loginTime = Date.now() - startTime;
             if (loginTime > 1000) {
-              console.log(`[NextAuth] HR login took ${loginTime}ms`);
+              // NextAuth HR login timing
             }
 
             return {
@@ -94,13 +90,13 @@ export const authOptions = {
               .maxTimeMS(2000); // Reduced to 2 seconds
               
             if (!employee) {
-              console.log("[NextAuth] Employee not found", empCode);
+              // NextAuth Employee not found
               return null;
             }
 
             const loginTime = Date.now() - startTime;
             if (loginTime > 1000) {
-              console.log(`[NextAuth] Employee login took ${loginTime}ms`);
+              // NextAuth Employee login timing
             }
 
             return {

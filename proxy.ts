@@ -14,7 +14,7 @@ export default withAuth(
     if (pathname === '/register') {
       // Block access if user is not logged in
       if (!token) {
-        console.log('[Middleware] Register page accessed without authentication, redirecting to login');
+        // Middleware: Register page accessed without authentication, redirecting to login
         url.pathname = '/login';
         url.searchParams.set('role', 'hr');
         return NextResponse.redirect(url);
@@ -35,7 +35,7 @@ export default withAuth(
     if (pathname.startsWith('/hr')) {
       // 1) Not logged in at all  -> send to HR login
       if (!token) {
-        console.log('[Middleware] No token found, redirecting to login');
+        // Middleware: No token found, redirecting to login
         url.pathname = '/login';
         url.searchParams.set('role', 'hr');
         return NextResponse.redirect(url);
@@ -51,7 +51,7 @@ export default withAuth(
       }
 
       // 3) token.role === 'HR' or 'ADMIN' -> let request continue
-      console.log('[Middleware] Access granted for role:', token.role);
+      // Middleware: Access granted
       return NextResponse.next();
     }
 

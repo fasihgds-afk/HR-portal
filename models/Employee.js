@@ -72,6 +72,10 @@ EmployeeSchema.index({ department: 1, shift: 1, empCode: 1 }, { background: true
 // Compound index for shiftId + department (for shift-based filtering with department)
 EmployeeSchema.index({ shiftId: 1, department: 1 }, { background: true });
 
+// CRITICAL: Compound index for department + empCode sorting (used in hr/employees route)
+// This index is essential for fast sorting by department then empCode
+EmployeeSchema.index({ department: 1, empCode: 1 }, { background: true });
+
 // CRITICAL: Index for sorting by empCode (used in all list queries)
 // This index is essential for fast pagination - MUST exist for performance
 // empCode already has an index from unique: true, but we ensure it's optimized for sorting

@@ -1,9 +1,9 @@
-// next-app/app/api/upload/route.js
-import { NextResponse } from 'next/server';
 import { createWriteStream } from 'fs';
 import { mkdir, stat } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { successResponse, errorResponseFromException } from '../../lib/api/response';
+import { ValidationError } from '../../lib/errors/errorHandler';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,10 +22,7 @@ export async function POST(req) {
     const file = formData.get('file');
 
     if (!file || typeof file === 'string') {
-      return NextResponse.json(
-        { error: 'No file uploaded' },
-        { status: 400 }
-      );
+      throw new ValidationError('No file uploaded');
     }
 
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'employees');
@@ -48,12 +45,8 @@ export async function POST(req) {
     // Frontend will store this in Employee.photoUrl
     const publicPath = `/uploads/employees/${fileName}`;
 
-    return NextResponse.json({ url: publicPath });
+    return successResponse({ url: publicPath }, 'File uploaded successfully', 201);
   } catch (err) {
-    console.error('POST /api/upload error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Upload failed' },
-      { status: 500 }
-    );
+    return errorResponseFromException(err, req);
   }
 }
