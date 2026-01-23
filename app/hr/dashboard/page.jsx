@@ -125,6 +125,21 @@ export default function HrDashboardPage() {
     loadLeaveStats();
   }, []);
 
+  // Auto-run Load and Save every 20 minutes
+  useEffect(() => {
+    // Run immediately on mount
+    handleLoadAndSave();
+
+    // Set up interval to run every 20 minutes (1200000 milliseconds)
+    const interval = setInterval(() => {
+      handleLoadAndSave();
+    }, 20 * 60 * 1000); // 20 minutes in milliseconds
+
+    // Cleanup interval on unmount
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessDate]); // Re-run when business date changes
+
   async function loadLeaveStats() {
     try {
       setLoadingLeaveStats(true);
