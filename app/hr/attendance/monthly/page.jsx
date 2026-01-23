@@ -367,8 +367,22 @@ export default function MonthlyHrPage() {
     try {
       const res = await fetch('/api/hr/shifts?activeOnly=true');
       if (res.ok) {
-        const data = await res.json();
-        setShifts(data.shifts || []);
+        const response = await res.json();
+        
+        // Handle standardized API response format
+        let shifts = [];
+        if (response.success !== undefined) {
+          if (!response.success) {
+            console.error('Failed to load shifts:', response.error || response.message);
+            return;
+          }
+          shifts = response.data?.shifts || [];
+        } else {
+          // Legacy format (backward compatibility)
+          shifts = response.shifts || [];
+        }
+        
+        setShifts(shifts);
       }
     } catch (err) {
       console.error('Failed to load shifts:', err);
@@ -397,8 +411,24 @@ export default function MonthlyHrPage() {
         throw new Error(text || `Request failed (${res.status})`);
       }
 
-      const json = await res.json();
-      setData(json);
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      // New format: { success, message, data: { employees, month, daysInMonth }, error }
+      // Old format (backward compatibility): { employees, month, daysInMonth }
+      let data = {};
+      if (response.success !== undefined) {
+        // New standardized format
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to load monthly attendance');
+        }
+        data = response.data || {};
+      } else {
+        // Legacy format (backward compatibility)
+        data = response;
+      }
+      
+      setData(data);
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to load monthly attendance');
@@ -468,7 +498,7 @@ export default function MonthlyHrPage() {
         violationExcused: editLateExcused || editEarlyExcused, // Legacy: for backward compatibility
       };
 
-      console.log('Saving with excused flags:', { lateExcused: editLateExcused, earlyExcused: editEarlyExcused });
+      // Saving with excused flags
 
       const res = await fetch('/api/hr/monthly-attendance', {
         method: 'POST',

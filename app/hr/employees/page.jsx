@@ -72,10 +72,25 @@ export default function HrDashboardPage() {
         throw new Error(text || `Request failed (${res.status})`);
       }
 
-      const data = await res.json();
-      const list = Array.isArray(data)
-        ? data
-        : data.employees || data.items || [];
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      // New format: { success, message, data: { employees }, error }
+      // Old format (backward compatibility): { employees } or array
+      let list = [];
+      
+      if (Array.isArray(response)) {
+        list = response;
+      } else if (response.success !== undefined) {
+        // New standardized format
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to load employees');
+        }
+        list = response.data?.employees || response.data?.items || [];
+      } else {
+        // Legacy format (backward compatibility)
+        list = response.employees || response.items || [];
+      }
 
       if (!cancelled) {
         setEmployees(list);
@@ -99,10 +114,10 @@ export default function HrDashboardPage() {
 
     // If overview tab is active, load data after a short delay (non-blocking)
     if (tab === "overview" && !dataLoaded && !statsLoading) {
-      // Small delay to let page render first (perceived performance)
+      // OPTIMIZATION: Reduced delay for faster data loading (page still renders first)
       const timer = setTimeout(() => {
         loadEmployees();
-      }, 300); // 300ms delay - page renders first, then loads data
+      }, 100); // 100ms delay - faster perceived performance
 
       return () => clearTimeout(timer);
     }

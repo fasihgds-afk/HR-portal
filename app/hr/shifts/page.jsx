@@ -67,8 +67,24 @@ export default function ShiftManagementPage() {
       setLoading(true);
       const res = await fetch('/api/hr/shifts?activeOnly=false');
       if (!res.ok) throw new Error('Failed to load shifts');
-      const data = await res.json();
-      setShifts(data.shifts || []);
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      // New format: { success, message, data: { shifts }, error }
+      // Old format (backward compatibility): { shifts }
+      let shifts = [];
+      if (response.success !== undefined) {
+        // New standardized format
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to load shifts');
+        }
+        shifts = response.data?.shifts || [];
+      } else {
+        // Legacy format (backward compatibility)
+        shifts = response.shifts || [];
+      }
+      
+      setShifts(shifts);
     } catch (err) {
       console.error(err);
       showToast('error', err.message || 'Failed to load shifts');
@@ -166,7 +182,13 @@ export default function ShiftManagementPage() {
         throw new Error(errorMessage);
       }
 
-      const data = await res.json();
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      if (response.success !== undefined && !response.success) {
+        throw new Error(response.error || response.message || 'Failed to save shift');
+      }
+      
       showToast('success', `Shift ${editingShift ? 'updated' : 'created'} successfully`);
       closeModal();
       await loadShifts();
@@ -184,8 +206,15 @@ export default function ShiftManagementPage() {
     try {
       setLoading(true);
       const res = await fetch(`/api/hr/shifts/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to deactivate shift');
-      showToast('success', 'Shift deactivated successfully');
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || errorData.message || 'Failed to deactivate shift');
+      }
+      const response = await res.json();
+      const message = response.success !== undefined 
+        ? (response.message || 'Shift deactivated successfully')
+        : 'Shift deactivated successfully';
+      showToast('success', message);
       await loadShifts();
     } catch (err) {
       console.error(err);
@@ -204,9 +233,13 @@ export default function ShiftManagementPage() {
       const res = await fetch(`/api/hr/shifts/${id}?permanent=true`, { method: 'DELETE' });
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.error || 'Failed to delete shift');
+        throw new Error(errorData.error || errorData.message || 'Failed to delete shift');
       }
-      showToast('success', 'Shift permanently deleted successfully');
+      const response = await res.json();
+      const message = response.success !== undefined 
+        ? (response.message || 'Shift permanently deleted successfully')
+        : 'Shift permanently deleted successfully';
+      showToast('success', message);
       await loadShifts();
     } catch (err) {
       console.error(err);
@@ -228,10 +261,24 @@ export default function ShiftManagementPage() {
       });
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.error || 'Failed to activate shifts');
+        throw new Error(errorData.error || errorData.message || 'Failed to activate shifts');
       }
-      const data = await res.json();
-      showToast('success', data.message || `Activated ${data.modifiedCount || 0} shift(s)`);
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      let message = '';
+      if (response.success !== undefined) {
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to activate shifts');
+        }
+        const modifiedCount = response.data?.modifiedCount || 0;
+        message = response.message || `Activated ${modifiedCount} shift(s)`;
+      } else {
+        // Legacy format
+        message = response.message || `Activated ${response.modifiedCount || 0} shift(s)`;
+      }
+      
+      showToast('success', message);
       await loadShifts();
     } catch (err) {
       console.error(err);

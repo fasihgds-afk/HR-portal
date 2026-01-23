@@ -94,8 +94,22 @@ export default function HrDashboardPage() {
     try {
       const res = await fetch('/api/hr/shifts?activeOnly=true');
       if (res.ok) {
-        const data = await res.json();
-        setShifts(data.shifts || []);
+        const response = await res.json();
+        
+        // Handle standardized API response format
+        let shifts = [];
+        if (response.success !== undefined) {
+          if (!response.success) {
+            console.error('Failed to load shifts:', response.error || response.message);
+            return;
+          }
+          shifts = response.data?.shifts || [];
+        } else {
+          // Legacy format (backward compatibility)
+          shifts = response.shifts || [];
+        }
+        
+        setShifts(shifts);
       }
     } catch (err) {
       console.error('Failed to load shifts:', err);
@@ -122,9 +136,32 @@ export default function HrDashboardPage() {
         throw new Error(text || `Request failed: ${res.status}`);
       }
 
-      const data = await res.json();
-      setRows(data.items || []);
-      const msg = `Saved ${data.savedCount ?? data.items?.length ?? 0} record(s) for ${data.date}`;
+      const response = await res.json();
+      
+      // Handle standardized API response format
+      // New format: { success, message, data: { items, savedCount, date }, error }
+      // Old format (backward compatibility): { items, savedCount, date }
+      let items = [];
+      let savedCount = 0;
+      let date = businessDate;
+      
+      if (response.success !== undefined) {
+        // New standardized format
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to load and save');
+        }
+        items = response.data?.items || [];
+        savedCount = response.data?.savedCount ?? items.length;
+        date = response.data?.date || businessDate;
+      } else {
+        // Legacy format (backward compatibility)
+        items = response.items || [];
+        savedCount = response.savedCount ?? items.length;
+        date = response.date || businessDate;
+      }
+      
+      setRows(items);
+      const msg = `Saved ${savedCount} record(s) for ${date}`;
       setStatus(msg);
       showToast('success', msg);
     } catch (err) {

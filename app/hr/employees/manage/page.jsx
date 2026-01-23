@@ -90,8 +90,22 @@ export default function EmployeeShiftPage() {
         cache: 'no-store', // Always get fresh shifts
       });
       if (res.ok) {
-        const data = await res.json();
-        setShifts(data.shifts || []);
+        const response = await res.json();
+        
+        // Handle standardized API response format
+        let shifts = [];
+        if (response.success !== undefined) {
+          if (!response.success) {
+            console.error('Failed to load shifts:', response.error || response.message);
+            return;
+          }
+          shifts = response.data?.shifts || [];
+        } else {
+          // Legacy format (backward compatibility)
+          shifts = response.shifts || [];
+        }
+        
+        setShifts(shifts);
       }
     } catch (err) {
       console.error('Failed to load shifts:', err);
@@ -158,31 +172,41 @@ export default function EmployeeShiftPage() {
         
         throw new Error(errorMessage);
       }
-      const data = await res.json();
+      const response = await res.json();
       
-      // Log response for debugging
-      console.log('Employee API Response:', {
-        itemsCount: data.items?.length || 0,
-        total: data.pagination?.total || 0,
-        page: data.pagination?.page || 1,
-        hasItems: !!data.items,
-        debug: data.debug, // Will show filter info in production
-      });
+      // Handle standardized API response format
+      // New format: { success, message, data: { items }, error, meta: { pagination } }
+      // Old format (backward compatibility): { items, pagination }
+      let items = [];
+      let pagination = null;
+      
+      if (response.success !== undefined) {
+        // New standardized format
+        if (!response.success) {
+          throw new Error(response.error || response.message || 'Failed to load employees');
+        }
+        items = response.data?.items || [];
+        pagination = response.meta?.pagination || null;
+      } else {
+        // Legacy format (backward compatibility)
+        items = response.items || [];
+        pagination = response.pagination || null;
+      }
       
       // Log if no employees found (for debugging)
-      if (!data.items || data.items.length === 0) {
+      if (!items || items.length === 0) {
         console.warn('⚠️ No employees found in API response:', {
-          items: data.items,
-          pagination: data.pagination,
-          total: data.pagination?.total,
-          debug: data.debug,
+          items: items,
+          pagination: pagination,
+          total: pagination?.total,
+          responseFormat: response.success !== undefined ? 'standardized' : 'legacy',
           url: res.url,
         });
       }
       
-      setEmployees(data.items || []);
-      if (data.pagination) {
-        setPagination(data.pagination);
+      setEmployees(items);
+      if (pagination) {
+        setPagination(pagination);
       }
     } catch (err) {
       console.error(err);
