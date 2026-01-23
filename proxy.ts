@@ -1,4 +1,4 @@
-// middleware.ts (Next.js middleware for route protection)
+// proxy.ts (Next.js 16 uses proxy.ts instead of middleware.ts for route protection)
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 
