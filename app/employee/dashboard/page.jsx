@@ -914,11 +914,25 @@ export default function EmployeeDashboardPage() {
           }
         );
         if (!res.ok) return;
-        const json = await res.json();
-        const item =
-          json.employee ||
-          json.item ||
-          (Array.isArray(json.items) ? json.items[0] : null);
+        const response = await res.json();
+        
+        // Handle standardized API response format
+        // New format: { success, message, data: { employee }, error }
+        // Old format (backward compatibility): { employee } or { item } or { items }
+        let item = null;
+        
+        if (response.success !== undefined) {
+          // New standardized format
+          if (!response.success) {
+            console.error('Failed to load employee:', response.error || response.message);
+            return;
+          }
+          item = response.data?.employee || response.data?.item || null;
+        } else {
+          // Legacy format (backward compatibility)
+          item = response.employee || response.item || (Array.isArray(response.items) ? response.items[0] : null);
+        }
+        
         if (item) setEmployee(item);
       } catch (err) {
         console.error("loadEmployeeProfile", err);
@@ -960,8 +974,25 @@ export default function EmployeeDashboardPage() {
           const text = await res.text();
           throw new Error(text || `Request failed (${res.status})`);
         }
-        const json = await res.json();
-        setAttendanceData(json);
+        const response = await res.json();
+        
+        // Handle standardized API response format
+        // New format: { success, message, data: { employees, ... }, error }
+        // Old format (backward compatibility): { employees, ... }
+        let attendanceData = null;
+        
+        if (response.success !== undefined) {
+          // New standardized format
+          if (!response.success) {
+            throw new Error(response.error || response.message || 'Failed to load monthly attendance');
+          }
+          attendanceData = response.data || {};
+        } else {
+          // Legacy format (backward compatibility)
+          attendanceData = response;
+        }
+        
+        setAttendanceData(attendanceData);
       } catch (err) {
         console.error(err);
         setErrorMsg(err.message || "Failed to load monthly attendance");
