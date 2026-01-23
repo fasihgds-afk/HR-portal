@@ -10,6 +10,19 @@ export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   // Add trustHost for Vercel deployment
   trustHost: true,
+  // Ensure cookies work on Vercel
+  useSecureCookies: process.env.NODE_ENV === 'production',
+  cookies: {
+    sessionToken: {
+      name: `${process.env.NODE_ENV === 'production' ? '__Secure-' : ''}next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+  },
 
   providers: [
     CredentialsProvider({
