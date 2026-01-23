@@ -61,10 +61,10 @@ function LoginInner() {
         return;
       }
 
-      // Optimize: Use router.push instead of window.location for faster navigation
-      // Next.js router is faster than full page reload
-      // The session cookie will still be sent with the next request
-      router.push(result.url || "/hr/employees");
+      // Use window.location for full page reload to ensure session cookie is sent
+      // This fixes the issue where router.push doesn't include the session cookie immediately
+      const redirectUrl = result.url || "/hr/employees";
+      window.location.href = redirectUrl;
     } catch (err) {
       console.error("HR login error", err);
       setErrorMsg("Something went wrong. Please try again.");
@@ -99,7 +99,10 @@ function LoginInner() {
         return;
       }
 
-      router.push(result.url || "/employee/dashboard");
+      // Use window.location for full page reload to ensure session cookie is sent
+      // This fixes the issue where router.push doesn't include the session cookie immediately
+      const redirectUrl = result.url || "/employee/dashboard";
+      window.location.href = redirectUrl;
     } catch (err) {
       console.error("Employee login error", err);
       setErrorMsg("Something went wrong. Please try again.");
