@@ -3,6 +3,9 @@
 // =============================================================================
 // MONTHLY ATTENDANCE API - VIOLATION FORMULA QUICK REFERENCE
 // =============================================================================
+import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
+
+import { ValidationError, NotFoundError } from '../../../../lib/errors/errorHandler';
 //
 // VIOLATION DEDUCTION FORMULA (Quick Summary):
 // --------------------------------------------
@@ -26,7 +29,6 @@
 //
 // =============================================================================
 
-import { NextResponse } from 'next/server';
 import { connectDB } from '../../../../lib/db';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
@@ -389,10 +391,7 @@ export async function GET(req) {
     const monthIndex = Number(monthStr) - 1;
 
     if (Number.isNaN(year) || Number.isNaN(monthIndex)) {
-      return NextResponse.json(
-        { error: 'Invalid "month" format. Use YYYY-MM.' },
-        { status: 400 }
-      );
+      throw new ValidationError('Invalid "month" format. Use YYYY-MM.');
     }
 
     const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 0, 0, 0));
@@ -440,14 +439,15 @@ export async function GET(req) {
       };
     }
 
-        // Check if Shift collection has any documents (to avoid unnecessary queries)
-        const shiftCount = await Shift.countDocuments({ isActive: true });
+        // OPTIMIZATION: Run queries in parallel for faster response
+        const [shiftCount, employees] = await Promise.all([
+          Shift.countDocuments({ isActive: true }),
+          Employee.find()
+            .select('empCode name department designation shift shiftId monthlySalary')
+            .lean()
+        ]);
+        
         const useDynamicShifts = shiftCount > 0;
-
-        // Use optimized projection - only select needed fields
-        const employees = await Employee.find()
-          .select('empCode name department designation shift shiftId monthlySalary')
-          .lean();
 
     const monthStartDate = `${monthPrefix}-01`;
     const monthEndDate = `${monthPrefix}-${String(daysInMonth).padStart(2, '0')}`;
@@ -471,7 +471,14 @@ export async function GET(req) {
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
       // Direct query - no caching
-      const allShifts = await Shift.find({ isActive: true }).lean();
+      // OPTIMIZATION: Use cached shifts if available (shifts rarely change)
+      const { getCachedShifts } = await import('../../../../lib/cache/shiftCache');
+      let allShifts = getCachedShifts(true); // Get active shifts from cache
+      
+      if (!allShifts) {
+        allShifts = await Shift.find({ isActive: true }).lean();
+        // Cache will be set by shifts route, no need to set here
+      }
       
       allShifts.forEach((s) => {
         allShiftsMap.set(s._id.toString(), s);
@@ -740,24 +747,6 @@ export async function GET(req) {
           const nextDay = day < daysInMonth ? day + 1 : null;
           const nextDayKey = nextDay ? `${emp.empCode}|${monthPrefix}-${String(nextDay).padStart(2, '0')}` : null;
           const nextDayDoc = nextDayKey ? docsByEmpDate.get(nextDayKey) : null;
-          console.log(`[DEBUG MONTHLY] ${emp.empCode} on ${date}:`, {
-            hasDoc: !!doc,
-            docDate: doc?.date,
-            docCheckIn: doc?.checkIn,
-            docCheckOut: doc?.checkOut,
-            docCheckOutType: typeof doc?.checkOut,
-            checkIn: checkIn?.toISOString(),
-            checkOut: checkOut?.toISOString(),
-            shiftCode,
-            isNightShift: shiftObj?.crossesMidnight || (shiftCode && ['N1', 'N2', 'S1', 'S2'].includes(shiftCode)),
-            nextDayKey,
-            nextDayDoc: nextDayDoc ? {
-              date: nextDayDoc.date,
-              checkIn: nextDayDoc.checkIn,
-              checkOut: nextDayDoc.checkOut,
-              checkOutType: typeof nextDayDoc.checkOut,
-            } : null,
-          });
         }
         
         const hasPunch = !!checkIn || !!checkOut;
@@ -824,63 +813,7 @@ export async function GET(req) {
           
           const flags = computeLateEarly(shiftForCalc, checkIn, checkOut, allShiftsMap);
           
-          // Debug logging for specific employees to verify shift calculations
-          if ((emp.empCode === '00002' || emp.empCode === '25057') && checkIn && checkOut) {
-            const shiftCodeForDebug = typeof shiftForCalc === 'object' ? shiftForCalc?.code : shiftForCalc;
-            const gracePeriodForDebug = typeof shiftForCalc === 'object' ? shiftForCalc?.gracePeriod : 15;
-            const shiftStartTime = typeof shiftForCalc === 'object' ? shiftForCalc?.startTime : 'N/A';
-            const shiftEndTime = typeof shiftForCalc === 'object' ? shiftForCalc?.endTime : 'N/A';
-            const crossesMidnightDebug = typeof shiftForCalc === 'object' ? shiftForCalc?.crossesMidnight : false;
-            
-            console.log(`[DEBUG SHIFT CALC] ${emp.empCode} (${emp.name || 'Unknown'}) on ${date}:`, {
-              shiftCode: shiftCodeForDebug,
-              shiftStartTime,
-              shiftEndTime,
-              gracePeriod: gracePeriodForDebug,
-              crossesMidnight: crossesMidnightDebug,
-              checkIn: checkIn.toISOString(),
-              checkOut: checkOut.toISOString(),
-              late: flags.late,
-              earlyLeave: flags.earlyLeave,
-              lateMinutes: flags.lateMinutes,
-              earlyMinutes: flags.earlyMinutes,
-              hasShiftObj: !!shiftForCalc,
-            });
-          }
           
-          // Debug logging for grace period violations (to verify logic)
-          if (flags.late || flags.earlyLeave) {
-            const shiftCodeForDebug = typeof shiftForCalc === 'object' ? shiftForCalc?.code : shiftForCalc;
-            const gracePeriodForDebug = typeof shiftForCalc === 'object' ? shiftForCalc?.gracePeriod : 15;
-            console.log(`[DEBUG GRACE] ${emp.empCode} on ${date}:`, {
-              shiftCode: shiftCodeForDebug,
-              gracePeriod: gracePeriodForDebug,
-              checkIn: checkIn.toISOString(),
-              checkOut: checkOut.toISOString(),
-              late: flags.late,
-              earlyLeave: flags.earlyLeave,
-              lateMinutes: flags.lateMinutes,
-              earlyMinutes: flags.earlyMinutes,
-              shiftStartTime: typeof shiftForCalc === 'object' ? shiftForCalc?.startTime : 'N/A',
-              shiftEndTime: typeof shiftForCalc === 'object' ? shiftForCalc?.endTime : 'N/A',
-            });
-          }
-          
-          // Debug logging for employee 25057 (Shehzad Iqbal) on specific dates
-          if (emp.empCode === '25057' && (date === '2025-12-19' || date === '2025-12-23' || date === '2025-12-24' || date === '2025-12-25')) {
-            console.log(`[DEBUG 25057] ${date}:`, {
-              shiftForCalc: typeof shiftForCalc === 'object' ? shiftForCalc.code : shiftForCalc,
-              shiftCode,
-              hasShiftObj: !!shiftObj,
-              checkIn: checkIn.toISOString(),
-              checkOut: checkOut.toISOString(),
-              late,
-              earlyLeave,
-              lateMinutes,
-              earlyMinutes,
-              flags,
-            });
-          }
           late = !!flags.late;
           earlyLeave = !!flags.earlyLeave;
 
@@ -1042,20 +975,6 @@ export async function GET(req) {
               );
               perMinuteFineDays += fineForThisDay;
               
-              // DEBUG LOGGING: Flag suspiciously high fines for investigation
-              if (fineForThisDay >= vConfig.maxPerMinuteFine || dayViolationMinutes > 200) {
-                console.log(`[DEBUG] High per-minute fine for ${emp.empCode} on ${date}:`, {
-                  empCode: emp.empCode,
-                  date,
-                  violationDay: vNo,
-                  dayViolationMinutes,
-                  fineForThisDay,
-                  late,
-                  earlyLeave,
-                  lateMinutes,
-                  earlyMinutes,
-                });
-              }
             }
           }
           // Note: vNo <= freeViolations means violations #1, #2, etc. are FREE (no deduction)
@@ -1213,34 +1132,6 @@ export async function GET(req) {
       // Example: If deduction = 35 days in a 30-day month, employee will have negative/zero net salary
       const salaryDeductDays = Number(salaryDeductDaysRaw.toFixed(3));
 
-      // Debug logging for high deductions (more than 20 days seems suspicious)
-      if (salaryDeductDays > 20) {
-        console.log(`[DEBUG] High deduction for ${emp.empCode} (${emp.name || 'Unknown'}):`, {
-          empCode: emp.empCode,
-          name: emp.name,
-          violationFullDays,
-          perMinuteDays: Number(perMinuteDays.toFixed(3)),
-          missingPunchDays,
-          unpaidLeaveDays,
-          absentDays,
-          halfDays,
-          violationDaysCount,
-          lateCount,
-          earlyCount,
-          totalLateMinutes,
-          totalEarlyMinutes,
-          totalSalaryDeductDays: salaryDeductDays,
-          breakdown: {
-            violationFullDays,
-            perMinuteDays: Number(perMinuteDays.toFixed(3)),
-            missingPunchDays,
-            unpaidLeaveDays,
-            absentDays,
-            halfDays,
-            sum: Number(salaryDeductDaysRaw.toFixed(3)),
-          },
-        });
-      }
 
       const grossSalary = emp.monthlySalary || 0;
       // Use actual days in the month for salary calculation (more accurate than fixed 30 days)
@@ -1341,17 +1232,13 @@ export async function GET(req) {
     };
 
     // Direct response - no caching
-    return NextResponse.json(result, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-      },
-    });
-  } catch (err) {
-    console.error('GET /api/hr/monthly-attendance error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    return successResponse(
+      result,
+      'Monthly attendance retrieved successfully',
+      HTTP_STATUS.OK
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
 
@@ -1377,10 +1264,7 @@ export async function POST(req) {
     } = body;
 
     if (!empCode || !date) {
-      return NextResponse.json(
-        { error: 'empCode and date are required' },
-        { status: 400 }
-      );
+      throw new ValidationError('empCode and date are required');
     }
 
     const TZ = process.env.TIMEZONE_OFFSET || '+05:00';
@@ -1395,10 +1279,7 @@ export async function POST(req) {
 
     const emp = await Employee.findOne({ empCode }).lean();
     if (!emp) {
-      return NextResponse.json(
-        { error: `Employee ${empCode} not found` },
-        { status: 404 }
-      );
+      throw new NotFoundError(`Employee ${empCode}`);
     }
 
     // Get shift for this date - use employee's current shift (no history)
@@ -1478,26 +1359,7 @@ export async function POST(req) {
       : (violationExcused !== undefined ? (violationExcused && earlyLeave) : false);
     const finalExcused = finalLateExcused || finalEarlyExcused; // Legacy field
 
-    console.log('POST /api/hr/monthly-attendance - Saving excused flags:', {
-      date,
-      empCode,
-      late,
-      earlyLeave,
-      lateExcused: finalLateExcused,
-      earlyExcused: finalEarlyExcused,
-      inputLateExcused: lateExcused,
-      inputEarlyExcused: earlyExcused,
-      inputViolationExcused: violationExcused,
-    });
-
-    console.log('POST /api/hr/monthly-attendance - Saving excused flags:', {
-      lateExcused: finalLateExcused,
-      earlyExcused: finalEarlyExcused,
-      late,
-      earlyLeave,
-      date,
-      empCode,
-    });
+    // Saving excused flags
 
     const hasPunch = !!checkIn || !!checkOut;
 
@@ -1559,12 +1421,12 @@ export async function POST(req) {
     // PERFORMANCE: Invalidate monthly attendance cache after update
     // Extract month from date (YYYY-MM-DD) to get YYYY-MM
     // Cache removed - data is always fresh
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('POST /api/hr/monthly-attendance error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+    return successResponse(
+      null,
+      'Attendance saved successfully',
+      HTTP_STATUS.OK
     );
+  } catch (err) {
+    return errorResponseFromException(err, req);
   }
 }
