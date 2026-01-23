@@ -937,11 +937,10 @@ export default function EmployeeDashboardPage() {
   useEffect(() => {
     if (!empCode) return;
     
-    // Lazy load: Wait 500ms after page load before fetching attendance
-    // This allows the page to render first
+    // OPTIMIZATION: Reduced delay for faster data loading (page still renders first)
     const timer = setTimeout(() => {
       setAttendanceDataLoaded(true);
-    }, 500);
+    }, 200); // 200ms delay - faster perceived performance
 
     return () => clearTimeout(timer);
   }, [empCode]);
