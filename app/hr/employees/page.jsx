@@ -296,6 +296,59 @@ export default function HrDashboardPage() {
             font-size: 16px !important;
           }
         }
+        
+        /* Laptop & Desktop Responsive Styles */
+        @media (min-width: 1024px) and (max-width: 1366px) {
+          .main-container {
+            padding: 20px 24px !important;
+          }
+          .header-container {
+            padding: 16px 22px !important;
+          }
+          .header-logo {
+            width: 75px !important;
+            height: 75px !important;
+          }
+          .header-title {
+            font-size: 20px !important;
+          }
+          .header-buttons {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+          }
+          .header-buttons button {
+            padding: 8px 16px !important;
+            font-size: 12px !important;
+          }
+          .card-content {
+            padding: 18px !important;
+          }
+        }
+        
+        @media (min-width: 1367px) and (max-width: 1440px) {
+          .main-container {
+            padding: 22px 26px !important;
+          }
+        }
+        
+        @media (min-width: 1441px) and (max-width: 1920px) {
+          .main-container {
+            padding: 24px 28px !important;
+          }
+        }
+        
+        @media (min-width: 1921px) {
+          .main-container {
+            padding: 28px 32px !important;
+          }
+          .header-title {
+            font-size: 24px !important;
+          }
+          .header-logo {
+            width: 100px !important;
+            height: 100px !important;
+          }
+        }
       `}</style>
       <div
         className="main-container"
@@ -309,7 +362,7 @@ export default function HrDashboardPage() {
         }}
       >
       {/* 🔹 ENHANCED PROFESSIONAL HEADER */}
-      <div style={{ maxWidth: 1400, margin: "0 auto 24px auto" }}>
+      <div className="container-responsive" style={{ margin: "0 auto 24px auto", width: '100%' }}>
         <div
           className="header-container"
             style={{
@@ -637,8 +690,9 @@ export default function HrDashboardPage() {
 
       {/* MAIN CARD */}
       <div
+          className="container-responsive"
           style={{
-          maxWidth: 1400,
+          width: '100%',
           margin: "0 auto",
           borderRadius: 16,
           background: colors.background.card,

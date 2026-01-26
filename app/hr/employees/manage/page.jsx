@@ -540,6 +540,57 @@ export default function EmployeeShiftPage() {
             font-size: 11px !important;
           }
         }
+        
+        /* Laptop & Desktop Responsive Styles */
+        @media (min-width: 1024px) and (max-width: 1366px) {
+          .manage-container {
+            padding: 20px 24px !important;
+          }
+          .manage-header {
+            padding: 16px 22px !important;
+          }
+          .manage-header-logo {
+            width: 50px !important;
+            height: 50px !important;
+          }
+          .manage-header-title {
+            font-size: 20px !important;
+          }
+          .manage-header-buttons {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+          }
+          .manage-header-buttons button {
+            padding: 8px 16px !important;
+            font-size: 12px !important;
+          }
+          .manage-table {
+            font-size: 12px !important;
+          }
+          .manage-table th,
+          .manage-table td {
+            padding: 8px 10px !important;
+            font-size: 12px !important;
+          }
+        }
+        
+        @media (min-width: 1367px) and (max-width: 1440px) {
+          .manage-container {
+            padding: 22px 26px !important;
+          }
+          .manage-table {
+            font-size: 12.5px !important;
+          }
+        }
+        
+        @media (min-width: 1441px) {
+          .manage-container {
+            padding: 24px 28px !important;
+          }
+          .manage-table {
+            font-size: 13px !important;
+          }
+        }
       `}</style>
       <div
         className="manage-container"
@@ -571,6 +622,7 @@ export default function EmployeeShiftPage() {
       />
 
       <div
+        className="container-responsive"
         style={{
           width: '100%',
           maxWidth: 1400,

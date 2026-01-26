@@ -1411,6 +1411,89 @@ export default function EmployeeDashboardPage() {
             font-size: 10px !important;
           }
         }
+        
+        /* Laptop & Desktop Responsive Styles */
+        @media (min-width: 1024px) and (max-width: 1366px) {
+          .employee-dashboard-container {
+            padding: 20px 24px !important;
+          }
+          .employee-header {
+            padding: 16px 22px !important;
+          }
+          .employee-header-logo {
+            width: 75px !important;
+            height: 75px !important;
+          }
+          .employee-header-title {
+            font-size: 20px !important;
+          }
+          .employee-header-right {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+          }
+          .employee-header-right input,
+          .employee-header-right select {
+            min-width: 150px !important;
+            font-size: 12px !important;
+          }
+          .employee-header-right button {
+            padding: 8px 16px !important;
+            font-size: 12px !important;
+          }
+          .employee-main-card {
+            padding: 18px 22px !important;
+          }
+          .employee-table {
+            font-size: 12px !important;
+          }
+          .employee-table th,
+          .employee-table td {
+            padding: 8px 6px !important;
+            font-size: 12px !important;
+          }
+        }
+        
+        @media (min-width: 1367px) and (max-width: 1440px) {
+          .employee-dashboard-container {
+            padding: 22px 26px !important;
+          }
+          .employee-header {
+            padding: 18px 24px !important;
+          }
+          .employee-table {
+            font-size: 12.5px !important;
+          }
+        }
+        
+        @media (min-width: 1441px) and (max-width: 1920px) {
+          .employee-dashboard-container {
+            padding: 24px 28px !important;
+          }
+          .employee-table {
+            font-size: 13px !important;
+          }
+        }
+        
+        @media (min-width: 1921px) {
+          .employee-dashboard-container {
+            padding: 28px 32px !important;
+          }
+          .employee-header-title {
+            font-size: 24px !important;
+          }
+          .employee-header-logo {
+            width: 100px !important;
+            height: 100px !important;
+          }
+          .employee-table {
+            font-size: 14px !important;
+          }
+          .employee-table th,
+          .employee-table td {
+            padding: 10px 8px !important;
+            font-size: 14px !important;
+          }
+        }
       `}</style>
       <style jsx global>{`
         /* Style for Year and Month dropdown options */
@@ -1424,7 +1507,7 @@ export default function EmployeeDashboardPage() {
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
         }
       `}</style>
-      <div style={{ maxWidth: 1280, margin: "0 auto 22px auto" }}>
+      <div className="container-responsive" style={{ maxWidth: 1280, margin: "0 auto 22px auto", width: '100%' }}>
         {/* HEADER */}
         <div
           className="employee-header"

@@ -340,11 +340,78 @@ export default function ShiftManagementPage() {
               justify-content: center !important;
             }
           }
+          
+          /* Laptop & Desktop Responsive Styles */
+          @media (min-width: 1024px) and (max-width: 1366px) {
+            .shift-header {
+              padding: 16px 22px !important;
+            }
+            .shift-header-logo {
+              width: 75px !important;
+              height: 75px !important;
+            }
+            .shift-header-title {
+              font-size: 20px !important;
+            }
+            .shift-header > div:last-child {
+              flex-wrap: wrap !important;
+              gap: 8px !important;
+            }
+            .shift-button {
+              padding: 8px 16px !important;
+              font-size: 12px !important;
+            }
+            .shift-table {
+              font-size: 12px !important;
+            }
+            .shift-table th,
+            .shift-table td {
+              padding: 8px 10px !important;
+            }
+          }
+          
+          @media (min-width: 1367px) and (max-width: 1440px) {
+            .shift-header {
+              padding: 18px 24px !important;
+            }
+            .shift-table {
+              font-size: 12.5px !important;
+            }
+          }
+          
+          @media (min-width: 1441px) and (max-width: 1920px) {
+            .shift-header {
+              padding: 20px 28px !important;
+            }
+            .shift-table {
+              font-size: 13px !important;
+            }
+          }
+          
+          @media (min-width: 1921px) {
+            .shift-header {
+              padding: 24px 32px !important;
+            }
+            .shift-header-title {
+              font-size: 24px !important;
+            }
+            .shift-header-logo {
+              width: 100px !important;
+              height: 100px !important;
+            }
+            .shift-table {
+              font-size: 14px !important;
+            }
+            .shift-table th,
+            .shift-table td {
+              padding: 10px 14px !important;
+            }
+          }
         `,
         }}
       />
       {/* Enhanced Professional Header */}
-      <div style={{ maxWidth: 1400, margin: '0 auto 24px auto' }}>
+      <div className="container-responsive" style={{ margin: '0 auto 24px auto', width: '100%' }}>
         <div
           className="shift-header"
           style={{

@@ -124,3 +124,249 @@ body {
     padding: 10px 16px !important;
   }
 }
+
+/* ==================== LAPTOP & DESKTOP RESPONSIVE UTILITIES ==================== */
+
+/* Base container-responsive style - uses percentage width on larger screens */
+@media (min-width: 1024px) {
+  .container-responsive {
+    width: 100% !important;
+  }
+}
+
+/* Small Laptops (1024px - 1366px) */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  .daily-page-container,
+  .monthly-container,
+  .manage-container,
+  .main-container {
+    padding: 20px 16px !important;
+  }
+  
+  /* Adjust container max-widths - use more of the screen */
+  .container-responsive {
+    max-width: 98% !important;
+    width: 100% !important;
+  }
+  
+  /* Reduce table font sizes slightly */
+  .daily-table,
+  .hr-att-table {
+    font-size: 12px !important;
+  }
+  
+  .daily-table th,
+  .daily-table td,
+  .hr-att-table th,
+  .hr-att-table td {
+    padding: 8px 10px !important;
+  }
+  
+  /* Compact header */
+  .daily-header {
+    padding: 14px 18px !important;
+  }
+  
+  .daily-header-logo {
+    width: 75px !important;
+    height: 75px !important;
+  }
+  
+  .daily-header-title {
+    font-size: 20px !important;
+  }
+  
+  /* Compact controls */
+  .daily-controls {
+    gap: 12px !important;
+  }
+  
+  .daily-controls input[type="date"],
+  .daily-controls select {
+    min-width: 150px !important;
+    font-size: 12px !important;
+  }
+  
+  /* Compact stats */
+  .daily-stats-strip {
+    gap: 6px !important;
+    font-size: 10px !important;
+  }
+  
+  .daily-stats-strip > div {
+    padding: 5px 8px !important;
+  }
+}
+
+/* Medium Laptops (1367px - 1440px) */
+@media (min-width: 1367px) and (max-width: 1440px) {
+  .container-responsive {
+    max-width: 98% !important;
+    width: 100% !important;
+  }
+  
+  .daily-page-container,
+  .monthly-container,
+  .manage-container,
+  .main-container {
+    padding: 22px 18px !important;
+  }
+  
+  .daily-table,
+  .hr-att-table {
+    font-size: 12.5px !important;
+  }
+  
+  .daily-table th,
+  .daily-table td,
+  .hr-att-table th,
+  .hr-att-table td {
+    padding: 9px 11px !important;
+  }
+}
+
+/* Large Desktops (1441px - 1920px) */
+@media (min-width: 1441px) and (max-width: 1920px) {
+  .container-responsive {
+    max-width: 95% !important;
+    width: 100% !important;
+  }
+  
+  .daily-page-container,
+  .monthly-container,
+  .manage-container {
+    padding: 24px 28px !important;
+  }
+  
+  .daily-table,
+  .hr-att-table {
+    font-size: 13px !important;
+  }
+}
+
+/* Ultra-wide Desktops (1921px+) */
+@media (min-width: 1921px) {
+  .container-responsive {
+    max-width: 95% !important;
+    width: 100% !important;
+  }
+  
+  .daily-page-container,
+  .monthly-container,
+  .manage-container {
+    padding: 28px 32px !important;
+  }
+  
+  .daily-table,
+  .hr-att-table {
+    font-size: 14px !important;
+  }
+  
+  .daily-table th,
+  .daily-table td,
+  .hr-att-table th,
+  .hr-att-table td {
+    padding: 10px 14px !important;
+  }
+  
+  .daily-header-title {
+    font-size: 24px !important;
+  }
+  
+  .daily-header-logo {
+    width: 100px !important;
+    height: 100px !important;
+  }
+}
+
+/* Responsive table adjustments for all desktop sizes */
+@media (min-width: 1024px) {
+  .daily-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .daily-table {
+    width: 100%;
+  }
+  
+  /* Ensure tables don't break on smaller laptops */
+  @media (min-width: 1024px) and (max-width: 1366px) {
+    .daily-table {
+      min-width: 850px !important;
+    }
+  }
+  
+  @media (min-width: 1367px) and (max-width: 1440px) {
+    .daily-table {
+      min-width: 900px !important;
+    }
+  }
+  
+  @media (min-width: 1441px) {
+    .daily-table {
+      min-width: 900px !important;
+    }
+  }
+}
+
+/* Responsive header buttons for different screen sizes */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  .daily-header button {
+    padding: 8px 16px !important;
+    font-size: 12px !important;
+  }
+  
+  .daily-header > div:last-child {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+}
+
+/* Responsive search and export controls */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  .daily-search-export {
+    gap: 8px !important;
+  }
+  
+  .daily-search-export input {
+    min-width: 200px !important;
+    font-size: 12px !important;
+  }
+  
+  .daily-search-export button {
+    padding: 7px 12px !important;
+    font-size: 11px !important;
+  }
+}
+
+/* Responsive legend and controls */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  .daily-legend {
+    font-size: 12px !important;
+    padding: 8px 10px !important;
+  }
+  
+  .daily-controls label {
+    font-size: 12px !important;
+  }
+}
+
+/* Card padding adjustments */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  .daily-main-card {
+    padding: 20px 24px !important;
+  }
+}
+
+@media (min-width: 1367px) and (max-width: 1440px) {
+  .daily-main-card {
+    padding: 22px 26px !important;
+  }
+}
+
+@media (min-width: 1441px) {
+  .daily-main-card {
+    padding: 24px 28px !important;
+  }
+}

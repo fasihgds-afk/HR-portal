@@ -1067,11 +1067,99 @@ export default function MonthlyHrPage() {
               font-size: 10px !important;
             }
           }
+          
+          /* Laptop & Desktop Responsive Styles */
+          @media (min-width: 1024px) and (max-width: 1366px) {
+            .monthly-container {
+              padding: 20px 24px !important;
+            }
+            .monthly-header {
+              padding: 14px 18px !important;
+            }
+            .monthly-header-logo {
+              width: 75px !important;
+              height: 75px !important;
+            }
+            .monthly-header-title {
+              font-size: 20px !important;
+            }
+            .monthly-header-buttons {
+              flex-wrap: wrap !important;
+              gap: 8px !important;
+            }
+            .monthly-header-buttons button {
+              padding: 8px 16px !important;
+              font-size: 12px !important;
+            }
+            .monthly-table {
+              min-width: 1400px !important;
+              font-size: 11px !important;
+            }
+            .monthly-table th,
+            .monthly-table td {
+              padding: 5px 3px !important;
+              font-size: 11px !important;
+            }
+            .monthly-controls input,
+            .monthly-controls select {
+              min-width: 200px !important;
+              font-size: 12px !important;
+            }
+            .monthly-search-input {
+              min-width: 240px !important;
+              font-size: 12px !important;
+            }
+          }
+          
+          @media (min-width: 1367px) and (max-width: 1440px) {
+            .monthly-container {
+              padding: 22px 26px !important;
+            }
+            .monthly-table {
+              min-width: 1500px !important;
+              font-size: 11.5px !important;
+            }
+            .monthly-table th,
+            .monthly-table td {
+              padding: 6px 4px !important;
+              font-size: 11.5px !important;
+            }
+          }
+          
+          @media (min-width: 1441px) and (max-width: 1920px) {
+            .monthly-container {
+              padding: 24px 28px !important;
+            }
+            .monthly-table {
+              font-size: 12px !important;
+            }
+          }
+          
+          @media (min-width: 1921px) {
+            .monthly-container {
+              padding: 28px 32px !important;
+            }
+            .monthly-header-title {
+              font-size: 24px !important;
+            }
+            .monthly-header-logo {
+              width: 100px !important;
+              height: 100px !important;
+            }
+            .monthly-table {
+              font-size: 13px !important;
+            }
+            .monthly-table th,
+            .monthly-table td {
+              padding: 7px 5px !important;
+              font-size: 13px !important;
+            }
+          }
         `,
         }}
       />
 
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+      <div className="container-responsive" style={{ margin: '0 auto', width: '100%' }}>
         {/* Top gradient header */}
         <div
           className="monthly-header"

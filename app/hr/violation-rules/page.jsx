@@ -168,12 +168,37 @@ export default function ViolationRulesPage() {
               grid-template-columns: 1fr !important;
             }
           }
+          
+          /* Laptop & Desktop Responsive Styles */
+          @media (min-width: 1024px) and (max-width: 1366px) {
+            .rules-header {
+              padding: 16px 22px !important;
+            }
+            .rules-form-section {
+              padding: 18px 22px !important;
+            }
+            .rules-form-grid {
+              gap: 12px !important;
+            }
+          }
+          
+          @media (min-width: 1367px) and (max-width: 1440px) {
+            .rules-form-section {
+              padding: 20px 24px !important;
+            }
+          }
+          
+          @media (min-width: 1441px) {
+            .rules-form-section {
+              padding: 24px 28px !important;
+            }
+          }
         `,
         }}
       />
 
       {/* Header */}
-      <div style={{ maxWidth: 1400, margin: '0 auto 24px auto' }}>
+      <div className="container-responsive" style={{ margin: '0 auto 24px auto', width: '100%' }}>
         <div
           className="rules-header"
           style={{

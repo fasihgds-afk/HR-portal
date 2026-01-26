@@ -667,11 +667,111 @@ export default function HrDashboardPage() {
               padding: 4px 6px !important;
             }
           }
+          
+          /* Laptop & Desktop Responsive Styles */
+          @media (min-width: 1024px) and (max-width: 1366px) {
+            .container-responsive {
+              max-width: 1200px !important;
+            }
+            .daily-header {
+              padding: 14px 18px !important;
+            }
+            .daily-header-logo {
+              width: 75px !important;
+              height: 75px !important;
+            }
+            .daily-header-title {
+              font-size: 20px !important;
+            }
+            .daily-header > div:last-child {
+              flex-wrap: wrap !important;
+              gap: 8px !important;
+            }
+            .daily-header button {
+              padding: 8px 16px !important;
+              font-size: 12px !important;
+            }
+            .daily-table {
+              min-width: 850px !important;
+              font-size: 12px !important;
+            }
+            .daily-table th,
+            .daily-table td {
+              padding: 8px 10px !important;
+            }
+            .daily-controls input[type="date"],
+            .daily-controls select {
+              min-width: 150px !important;
+              font-size: 12px !important;
+            }
+            .daily-search-export input {
+              min-width: 200px !important;
+              font-size: 12px !important;
+            }
+            .daily-search-export button {
+              padding: 7px 12px !important;
+              font-size: 11px !important;
+            }
+            .daily-legend {
+              font-size: 12px !important;
+              padding: 8px 10px !important;
+            }
+            .daily-stats-strip {
+              gap: 6px !important;
+              font-size: 10px !important;
+            }
+            .daily-stats-strip > div {
+              padding: 5px 8px !important;
+            }
+          }
+          
+          @media (min-width: 1367px) and (max-width: 1440px) {
+            .container-responsive {
+              max-width: 1300px !important;
+            }
+            .daily-table {
+              min-width: 900px !important;
+              font-size: 12.5px !important;
+            }
+            .daily-table th,
+            .daily-table td {
+              padding: 9px 11px !important;
+            }
+          }
+          
+          @media (min-width: 1441px) and (max-width: 1920px) {
+            .container-responsive {
+              max-width: 1400px !important;
+            }
+            .daily-table {
+              font-size: 13px !important;
+            }
+          }
+          
+          @media (min-width: 1921px) {
+            .container-responsive {
+              max-width: 1600px !important;
+            }
+            .daily-header-title {
+              font-size: 24px !important;
+            }
+            .daily-header-logo {
+              width: 100px !important;
+              height: 100px !important;
+            }
+            .daily-table {
+              font-size: 14px !important;
+            }
+            .daily-table th,
+            .daily-table td {
+              padding: 10px 14px !important;
+            }
+          }
         `,
         }}
       />
 
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+      <div className="container-responsive" style={{ margin: '0 auto', width: '100%' }}>
         {/* Brand header bar with logo */}
         <div
           className="daily-header"
@@ -741,7 +841,7 @@ export default function HrDashboardPage() {
           </div>
 
           {/* right side of header: selected date tag + button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div
               style={{
                 padding: '6px 12px',
