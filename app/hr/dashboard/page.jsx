@@ -671,7 +671,11 @@ export default function HrDashboardPage() {
           /* Laptop & Desktop Responsive Styles */
           @media (min-width: 1024px) and (max-width: 1366px) {
             .container-responsive {
-              max-width: 1200px !important;
+              max-width: 98% !important;
+              width: 100% !important;
+            }
+            .daily-page-container {
+              padding: 20px 16px !important;
             }
             .daily-header {
               padding: 14px 18px !important;
@@ -723,11 +727,18 @@ export default function HrDashboardPage() {
             .daily-stats-strip > div {
               padding: 5px 8px !important;
             }
+            .daily-main-card {
+              padding: 20px 24px !important;
+            }
           }
           
           @media (min-width: 1367px) and (max-width: 1440px) {
             .container-responsive {
-              max-width: 1300px !important;
+              max-width: 98% !important;
+              width: 100% !important;
+            }
+            .daily-page-container {
+              padding: 22px 18px !important;
             }
             .daily-table {
               min-width: 900px !important;
@@ -737,20 +748,38 @@ export default function HrDashboardPage() {
             .daily-table td {
               padding: 9px 11px !important;
             }
+            .daily-main-card {
+              padding: 22px 26px !important;
+            }
           }
           
           @media (min-width: 1441px) and (max-width: 1920px) {
             .container-responsive {
-              max-width: 1400px !important;
+              max-width: 95% !important;
+              width: 100% !important;
+            }
+            .daily-page-container {
+              padding: 24px 28px !important;
             }
             .daily-table {
               font-size: 13px !important;
+              width: 100% !important;
+            }
+            .daily-table-wrapper {
+              width: 100% !important;
+            }
+            .daily-main-card {
+              padding: 24px 28px !important;
             }
           }
           
           @media (min-width: 1921px) {
             .container-responsive {
-              max-width: 1600px !important;
+              max-width: 95% !important;
+              width: 100% !important;
+            }
+            .daily-page-container {
+              padding: 28px 32px !important;
             }
             .daily-header-title {
               font-size: 24px !important;
@@ -761,10 +790,28 @@ export default function HrDashboardPage() {
             }
             .daily-table {
               font-size: 14px !important;
+              width: 100% !important;
+            }
+            .daily-table-wrapper {
+              width: 100% !important;
             }
             .daily-table th,
             .daily-table td {
               padding: 10px 14px !important;
+            }
+            .daily-main-card {
+              padding: 24px 28px !important;
+            }
+          }
+          
+          /* Ensure table uses full width on all desktop sizes */
+          @media (min-width: 1024px) {
+            .daily-table-wrapper {
+              width: 100% !important;
+              overflow-x: auto !important;
+            }
+            .daily-table {
+              width: 100% !important;
             }
           }
         `,
@@ -1348,7 +1395,7 @@ export default function HrDashboardPage() {
               </div>
             </div>
 
-            <div className="daily-table-wrapper" style={{ overflowX: 'auto' }}>
+            <div className="daily-table-wrapper" style={{ overflowX: 'auto', width: '100%' }}>
                 <table
                 className="hr-att-table daily-table"
                 style={{
