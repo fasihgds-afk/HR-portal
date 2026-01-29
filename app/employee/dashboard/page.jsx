@@ -1413,9 +1413,23 @@ export default function EmployeeDashboardPage() {
         }
         
         /* Laptop & Desktop Responsive Styles */
+        /* Desktop: equal left/right spacing via centered container with % width */
+        @media (min-width: 1024px) {
+          .employee-dashboard-inner {
+            max-width: 98% !important;
+            width: 100% !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+          }
+        }
+        @media (min-width: 1441px) {
+          .employee-dashboard-inner {
+            max-width: 95% !important;
+          }
+        }
         @media (min-width: 1024px) and (max-width: 1366px) {
           .employee-dashboard-container {
-            padding: 20px 24px !important;
+            padding: 20px 16px !important;
           }
           .employee-header {
             padding: 16px 22px !important;
@@ -1455,7 +1469,7 @@ export default function EmployeeDashboardPage() {
         
         @media (min-width: 1367px) and (max-width: 1440px) {
           .employee-dashboard-container {
-            padding: 22px 26px !important;
+            padding: 22px 18px !important;
           }
           .employee-header {
             padding: 18px 24px !important;
@@ -1507,7 +1521,7 @@ export default function EmployeeDashboardPage() {
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
         }
       `}</style>
-      <div className="container-responsive" style={{ maxWidth: 1280, margin: "0 auto 22px auto", width: '100%' }}>
+      <div className="container-responsive employee-dashboard-inner" style={{ margin: "0 auto 22px auto", width: '100%' }}>
         {/* HEADER */}
         <div
           className="employee-header"
@@ -1725,10 +1739,10 @@ export default function EmployeeDashboardPage() {
 
       {/* MAIN CARD */}
       <div
-        className="employee-main-card"
+        className="employee-main-card container-responsive employee-dashboard-inner"
         style={{
-          maxWidth: 1280,
           margin: "0 auto",
+          width: '100%',
           borderRadius: 22,
           background: colors.gradient.card,
           boxShadow: colors.card.shadow,

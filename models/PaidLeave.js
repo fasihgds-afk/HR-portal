@@ -74,21 +74,23 @@ PaidLeaveSchema.set('toJSON', { virtuals: true });
 PaidLeaveSchema.set('toObject', { virtuals: true });
 
 // Static method to get or create paid leave record for an employee in a year
-PaidLeaveSchema.statics.getOrCreate = async function (empCode, year) {
-  let paidLeave = await this.findOne({ empCode, year });
-  
+// Optional session for use inside MongoDB transactions
+PaidLeaveSchema.statics.getOrCreate = async function (empCode, year, session = null) {
+  const opts = session ? { session } : {};
+  let paidLeave = await this.findOne({ empCode, year }, null, opts);
+
   if (!paidLeave) {
-    // Create new record with default allocations
-    paidLeave = await this.create({
+    paidLeave = await this.create([{
       empCode,
       year,
       casualLeavesAllocated: 12,
       annualLeavesAllocated: 12,
       casualLeavesTaken: 0,
       annualLeavesTaken: 0,
-    });
+    }], opts);
+    paidLeave = paidLeave[0];
   }
-  
+
   return paidLeave;
 };
 

@@ -139,14 +139,18 @@ body {
   .daily-page-container,
   .monthly-container,
   .manage-container,
-  .main-container {
+  .main-container,
+  .employee-dashboard-container {
     padding: 20px 16px !important;
   }
   
   /* Adjust container max-widths - use more of the screen */
-  .container-responsive {
+  .container-responsive,
+  .employee-dashboard-inner {
     max-width: 98% !important;
     width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   /* Reduce table font sizes slightly */
@@ -200,15 +204,19 @@ body {
 
 /* Medium Laptops (1367px - 1440px) */
 @media (min-width: 1367px) and (max-width: 1440px) {
-  .container-responsive {
+  .container-responsive,
+  .employee-dashboard-inner {
     max-width: 98% !important;
     width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   .daily-page-container,
   .monthly-container,
   .manage-container,
-  .main-container {
+  .main-container,
+  .employee-dashboard-container {
     padding: 22px 18px !important;
   }
   
@@ -227,14 +235,18 @@ body {
 
 /* Large Desktops (1441px - 1920px) */
 @media (min-width: 1441px) and (max-width: 1920px) {
-  .container-responsive {
+  .container-responsive,
+  .employee-dashboard-inner {
     max-width: 95% !important;
     width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   .daily-page-container,
   .monthly-container,
-  .manage-container {
+  .manage-container,
+  .employee-dashboard-container {
     padding: 24px 28px !important;
   }
   
@@ -246,14 +258,18 @@ body {
 
 /* Ultra-wide Desktops (1921px+) */
 @media (min-width: 1921px) {
-  .container-responsive {
+  .container-responsive,
+  .employee-dashboard-inner {
     max-width: 95% !important;
     width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   .daily-page-container,
   .monthly-container,
-  .manage-container {
+  .manage-container,
+  .employee-dashboard-container {
     padding: 28px 32px !important;
   }
   

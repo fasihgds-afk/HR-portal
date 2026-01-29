@@ -29,6 +29,7 @@ import { ValidationError, NotFoundError } from '../../../../lib/errors/errorHand
 //
 // =============================================================================
 
+import mongoose from 'mongoose';
 import { connectDB } from '../../../../lib/db';
 import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
@@ -1261,6 +1262,37 @@ export async function GET(req) {
 }
 
 // -----------------------------------------------------------------------------
+// PAID LEAVE COUNTER HELPERS (defensive: counters never go below zero)
+// -----------------------------------------------------------------------------
+
+/**
+ * Increment paid leave taken for the given type. Only increments if there is
+ * remaining balance (same business rule as before).
+ * @param {import('mongoose').Document} paidLeaveDoc - PaidLeave document (mutated)
+ * @param {string} leaveType - 'casual' or 'annual'
+ */
+function incrementPaidLeaveTaken(paidLeaveDoc, leaveType) {
+  if (leaveType === 'casual' && (paidLeaveDoc.casualLeavesAllocated || 0) - (paidLeaveDoc.casualLeavesTaken || 0) > 0) {
+    paidLeaveDoc.casualLeavesTaken = (paidLeaveDoc.casualLeavesTaken || 0) + 1;
+  } else if (leaveType === 'annual' && (paidLeaveDoc.annualLeavesAllocated || 0) - (paidLeaveDoc.annualLeavesTaken || 0) > 0) {
+    paidLeaveDoc.annualLeavesTaken = (paidLeaveDoc.annualLeavesTaken || 0) + 1;
+  }
+}
+
+/**
+ * Decrement paid leave taken for the given type. Never goes below zero.
+ * @param {import('mongoose').Document} paidLeaveDoc - PaidLeave document (mutated)
+ * @param {string} leaveType - 'casual' or 'annual'
+ */
+function decrementPaidLeaveTaken(paidLeaveDoc, leaveType) {
+  if (leaveType === 'casual') {
+    paidLeaveDoc.casualLeavesTaken = Math.max(0, (paidLeaveDoc.casualLeavesTaken || 0) - 1);
+  } else if (leaveType === 'annual') {
+    paidLeaveDoc.annualLeavesTaken = Math.max(0, (paidLeaveDoc.annualLeavesTaken || 0) - 1);
+  }
+}
+
+// -----------------------------------------------------------------------------
 // POST /api/hr/monthly-attendance
 // -----------------------------------------------------------------------------
 
@@ -1442,143 +1474,108 @@ export async function POST(req) {
       updatedAt: new Date(),
     };
 
-    // Check current status in database to detect changes
+    // Check current status in database to detect changes (read before transaction)
     const existingRecord = await ShiftAttendance.findOne({ empCode, date })
       .select('attendanceStatus leaveType')
       .lean()
       .maxTimeMS(2000);
-    
+
     const wasPaidLeave = existingRecord?.attendanceStatus === 'Paid Leave';
     const isPaidLeave = attendanceStatus === 'Paid Leave';
-    
-    // Handle Paid Leave synchronization
-    // First, check if there's an existing leave record for this date
-    const existingLeave = await LeaveRecord.findOne({ empCode, date }).lean();
-    
-    if (isPaidLeave && leaveType) {
-      // Marking as Paid Leave - create/update leave records
-      const year = parseInt(date.split('-')[0], 10);
-      const paidLeave = await PaidLeave.getOrCreate(empCode, year);
-      
-      if (!existingLeave) {
-        // No existing leave record - create new one using upsert to prevent duplicates
-        await LeaveRecord.findOneAndUpdate(
-          { empCode, date },
-          {
-            empCode,
-            date,
-            leaveType,
-            reason: reason || '',
-            markedBy: 'HR',
-          },
-          { upsert: true, new: true }
-        );
 
-        // Update paid leave counter (only if there are remaining leaves)
-        if (leaveType === 'casual' && paidLeave.casualLeavesRemaining > 0) {
-          paidLeave.casualLeavesTaken += 1;
-        } else if (leaveType === 'annual' && paidLeave.annualLeavesRemaining > 0) {
-          paidLeave.annualLeavesTaken += 1;
-        }
-        await paidLeave.save();
-      } else if (existingLeave.leaveType !== leaveType) {
-        // Leave type changed (casual to annual or vice versa) - update counters
-        const oldLeaveType = existingLeave.leaveType;
-        
-        // Decrement old leave type
-        if (oldLeaveType === 'casual' && paidLeave.casualLeavesTaken > 0) {
-          paidLeave.casualLeavesTaken -= 1;
-        } else if (oldLeaveType === 'annual' && paidLeave.annualLeavesTaken > 0) {
-          paidLeave.annualLeavesTaken -= 1;
-        }
-        
-        // Increment new leave type (only if there are remaining leaves)
-        if (leaveType === 'casual' && paidLeave.casualLeavesRemaining > 0) {
-          paidLeave.casualLeavesTaken += 1;
-        } else if (leaveType === 'annual' && paidLeave.annualLeavesRemaining > 0) {
-          paidLeave.annualLeavesTaken += 1;
-        }
-        
-        // Update leave record
-        await LeaveRecord.findOneAndUpdate(
-          { empCode, date },
-          { leaveType, reason: reason || existingLeave.reason || '' }
-        );
-        
-        await paidLeave.save();
-      }
-      // If existingLeave exists and leaveType matches, do nothing (already correct)
-    } else if (wasPaidLeave && !isPaidLeave) {
-      // Changing FROM Paid Leave to another status - remove leave records
-      if (existingLeave) {
-        const year = parseInt(date.split('-')[0], 10);
-        const paidLeave = await PaidLeave.findOne({ empCode, year });
-        
-        if (paidLeave) {
-          // Decrement the appropriate leave counter
-          if (existingLeave.leaveType === 'casual' && paidLeave.casualLeavesTaken > 0) {
-            paidLeave.casualLeavesTaken -= 1;
-          } else if (existingLeave.leaveType === 'annual' && paidLeave.annualLeavesTaken > 0) {
-            paidLeave.annualLeavesTaken -= 1;
+    // Only fetch leave record when status is or was Paid Leave (fewer queries)
+    const existingLeave = (wasPaidLeave || isPaidLeave)
+      ? await LeaveRecord.findOne({ empCode, date }).lean().maxTimeMS(2000)
+      : null;
+
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // -------------------------------------------------------------------------
+        // STATE TRANSITION: Normal → Paid Leave (new paid leave for this date)
+        // -------------------------------------------------------------------------
+        if (isPaidLeave && leaveType) {
+          const year = parseInt(date.split('-')[0], 10);
+          const paidLeave = await PaidLeave.getOrCreate(empCode, year, session);
+
+          if (!existingLeave) {
+            await LeaveRecord.findOneAndUpdate(
+              { empCode, date },
+              {
+                empCode,
+                date,
+                leaveType,
+                reason: reason || '',
+                markedBy: 'HR',
+              },
+              { upsert: true, new: true, session }
+            );
+            incrementPaidLeaveTaken(paidLeave, leaveType);
+            await paidLeave.save({ session });
+          } else if (existingLeave.leaveType !== leaveType) {
+            // -------------------------------------------------------------------------
+            // STATE TRANSITION: Paid Leave type change (casual ↔ annual)
+            // -------------------------------------------------------------------------
+            const oldLeaveType = existingLeave.leaveType;
+            decrementPaidLeaveTaken(paidLeave, oldLeaveType);
+            incrementPaidLeaveTaken(paidLeave, leaveType);
+            await LeaveRecord.findOneAndUpdate(
+              { empCode, date },
+              { leaveType, reason: reason || existingLeave.reason || '' },
+              { session }
+            );
+            await paidLeave.save({ session });
           }
-          await paidLeave.save();
+        } else if (wasPaidLeave && !isPaidLeave) {
+          // -------------------------------------------------------------------------
+          // STATE TRANSITION: Paid Leave → Normal (revert to present/absent/etc.)
+          // -------------------------------------------------------------------------
+          if (existingLeave) {
+            const year = parseInt(date.split('-')[0], 10);
+            const paidLeave = await PaidLeave.findOne({ empCode, year }).session(session);
+            if (paidLeave) {
+              decrementPaidLeaveTaken(paidLeave, existingLeave.leaveType);
+              await paidLeave.save({ session });
+            }
+            await LeaveRecord.findOneAndDelete({ empCode, date }, { session });
+          }
+          delete update.leaveType;
+        } else if (wasPaidLeave && isPaidLeave && !leaveType) {
+          // Still Paid Leave but leaveType not provided – keep or default
+          if (existingLeave) {
+            update.leaveType = existingLeave.leaveType;
+          } else {
+            const year = parseInt(date.split('-')[0], 10);
+            const paidLeave = await PaidLeave.getOrCreate(empCode, year, session);
+            const defaultLeaveType = (paidLeave.casualLeavesAllocated || 0) - (paidLeave.casualLeavesTaken || 0) > 0 ? 'casual' : 'annual';
+            update.leaveType = defaultLeaveType;
+            await LeaveRecord.findOneAndUpdate(
+              { empCode, date },
+              {
+                empCode,
+                date,
+                leaveType: defaultLeaveType,
+                reason: reason || '',
+                markedBy: 'HR',
+              },
+              { upsert: true, new: true, session }
+            );
+            incrementPaidLeaveTaken(paidLeave, defaultLeaveType);
+            await paidLeave.save({ session });
+          }
         }
-        
-        // Delete leave record
-        await LeaveRecord.findOneAndDelete({ empCode, date });
-      }
-      
-      // Remove leaveType from update object since status is no longer Paid Leave
-      delete update.leaveType;
-    } else if (wasPaidLeave && isPaidLeave && !leaveType) {
-      // Status is still Paid Leave but leaveType is missing - try to get from existing record
-      if (existingLeave) {
-        // Keep the existing leaveType
-        update.leaveType = existingLeave.leaveType;
-      } else {
-        // No leaveType provided and no existing record - default to casual
-        const year = parseInt(date.split('-')[0], 10);
-        const paidLeave = await PaidLeave.getOrCreate(empCode, year);
-        
-        // Use casual as default if no leaveType specified
-        const defaultLeaveType = paidLeave.casualLeavesRemaining > 0 ? 'casual' : 'annual';
-        update.leaveType = defaultLeaveType;
-        
-        // Create leave record with default type using upsert to prevent duplicates
-        await LeaveRecord.findOneAndUpdate(
-          { empCode, date },
-          {
-            empCode,
-            date,
-            leaveType: defaultLeaveType,
-            reason: reason || '',
-            markedBy: 'HR',
-          },
-          { upsert: true, new: true }
-        );
-        
-        // Update counter
-        if (defaultLeaveType === 'casual' && paidLeave.casualLeavesRemaining > 0) {
-          paidLeave.casualLeavesTaken += 1;
-        } else if (defaultLeaveType === 'annual' && paidLeave.annualLeavesRemaining > 0) {
-          paidLeave.annualLeavesTaken += 1;
-        }
-        await paidLeave.save();
-      }
+
+        // ShiftAttendance update (same upsert, with session)
+        await ShiftAttendance.findOneAndUpdate(
+          { date, empCode },
+          { $set: update },
+          { upsert: true, runValidators: true, session }
+        ).maxTimeMS(3000);
+      });
+    } finally {
+      await session.endSession();
     }
 
-    // OPTIMIZATION: Use findOneAndUpdate with upsert instead of delete + create (faster, atomic)
-    // This is more efficient than deleteMany + create
-    await ShiftAttendance.findOneAndUpdate(
-      { date, empCode },
-      { $set: update },
-      { upsert: true, runValidators: true }
-    )
-      .maxTimeMS(3000); // Timeout for update operation
-
-    // PERFORMANCE: Invalidate monthly attendance cache after update
-    // Extract month from date (YYYY-MM-DD) to get YYYY-MM
-    // Cache removed - data is always fresh
     return successResponse(
       null,
       'Attendance saved successfully',

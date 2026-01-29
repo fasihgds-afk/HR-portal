@@ -43,3 +43,6 @@ next-env.d.ts
 # next-app build and dependencies
 next-app/.next/
 next-app/node_modules/
+
+# sync-service (optional; exclude from repo if not needed)
+/sync-service/
