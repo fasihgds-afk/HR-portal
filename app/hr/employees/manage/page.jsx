@@ -46,6 +46,7 @@ const selectStyle = {
 export default function EmployeeShiftPage() {
   const [employees, setEmployees] = useState([]);
   const [shifts, setShifts] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState(''); // Search query only
@@ -109,6 +110,19 @@ export default function EmployeeShiftPage() {
       }
     } catch (err) {
       console.error('Failed to load shifts:', err);
+    }
+  }
+
+  async function loadDepartments() {
+    try {
+      const res = await fetch('/api/hr/departments', { cache: 'no-store' });
+      if (res.ok) {
+        const response = await res.json();
+        const list = response.data?.departments ?? response.departments ?? [];
+        setDepartments(Array.isArray(list) ? list : []);
+      }
+    } catch (err) {
+      console.error('Failed to load departments:', err);
     }
   }
 
@@ -216,9 +230,10 @@ export default function EmployeeShiftPage() {
     }
   }
 
-  // OPTIMIZATION: Load shifts and employees in parallel on mount
+  // OPTIMIZATION: Load shifts, departments, and employees in parallel on mount
   useEffect(() => {
     loadShifts();
+    loadDepartments();
     loadEmployees(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -310,6 +325,7 @@ export default function EmployeeShiftPage() {
   // Open modal for adding new employee
   function openAddModal() {
     setEditingEmployee(null);
+    loadDepartments(); // Refresh so new departments from Department Policies show in dropdown
     setIsModalOpen(true);
   }
 
@@ -323,7 +339,7 @@ export default function EmployeeShiftPage() {
         email: formData.email || undefined,
         monthlySalary: formData.monthlySalary ? Number(formData.monthlySalary) : undefined,
         shift: formData.shift || '',
-        department: formData.department || undefined,
+        department: (formData.department ?? '').trim(),
         designation: formData.designation || undefined,
         phoneNumber: formData.phoneNumber || undefined,
         cnic: formData.cnic || undefined,
@@ -343,23 +359,27 @@ export default function EmployeeShiftPage() {
       }
 
       const data = await res.json();
+      const employee = data.data?.employee ?? data.employee;
+      if (!employee) {
+        throw new Error('Invalid response: no employee returned');
+      }
 
       // Update employees list
       setEmployees((prev) => {
-        const exists = prev.some((e) => e.empCode === data.employee.empCode);
+        const exists = prev.some((e) => e.empCode === employee.empCode);
         if (exists) {
           return prev.map((e) =>
-            e.empCode === data.employee.empCode ? data.employee : e
+            e.empCode === employee.empCode ? employee : e
           );
         }
-        return [...prev, data.employee].sort((a, b) =>
+        return [...prev, employee].sort((a, b) =>
           String(a.empCode).localeCompare(String(b.empCode))
         );
       });
 
       showToast('success', editingEmployee 
-        ? `Employee ${data.employee.empCode} updated successfully`
-        : `Employee ${data.employee.empCode} added successfully`
+        ? `Employee ${employee.empCode} updated successfully`
+        : `Employee ${employee.empCode} added successfully`
       );
 
       setIsModalOpen(false);
@@ -447,6 +467,7 @@ export default function EmployeeShiftPage() {
   // Open modal for editing existing employee
   function openEditModal(emp) {
     setEditingEmployee(emp);
+    loadDepartments(); // Refresh so department dropdown is up to date
     setIsModalOpen(true);
     setShowShiftHistory(false);
     loadShiftHistory(emp.empCode);
@@ -858,6 +879,7 @@ export default function EmployeeShiftPage() {
         <EmployeeForm
           employee={editingEmployee}
           shifts={shifts}
+          departments={departments}
           onSubmit={handleFormSubmit}
           onCancel={closeModal}
           loading={isSaving}

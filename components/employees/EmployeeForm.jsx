@@ -13,6 +13,7 @@ import EmployeeAvatar from './EmployeeAvatar';
 export default function EmployeeForm({
   employee = null, // If provided, form is in edit mode
   shifts = [],
+  departments = [], // List of { name } from /api/hr/departments - used for department dropdown (dynamic across app)
   onSubmit,
   onCancel,
   loading = false,
@@ -308,13 +309,36 @@ export default function EmployeeForm({
           >
             <div>
               <label style={labelStyle}>Department</label>
-              <input
-                type="text"
-                value={formData.department}
+              <select
+                value={formData.department || ''}
                 onChange={(e) => handleChange('department', e.target.value)}
-                placeholder="e.g. IT, HR, Development"
-                style={inputStyle}
-              />
+                style={{
+                  ...inputStyle,
+                  cursor: 'pointer',
+                  backgroundColor: '#ffffff',
+                }}
+              >
+                <option value="">Select Department</option>
+                {[
+                  ...new Set(
+                    [
+                      ...(departments || []).map((d) => (d.name || '').trim()).filter(Boolean),
+                      (formData.department || '').trim(),
+                    ].filter(Boolean)
+                  ),
+                ]
+                  .sort((a, b) => a.localeCompare(b))
+                  .map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+              </select>
+              {(!departments || departments.length === 0) && (
+                <p style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
+                  Add departments in HR → Departments to assign Saturday policy.
+                </p>
+              )}
             </div>
 
             <div>

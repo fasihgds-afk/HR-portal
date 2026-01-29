@@ -222,6 +222,10 @@ export default function HrDashboardPage() {
     router.push("/hr/shifts");
   }
 
+  function openDepartmentPolicies() {
+    router.push("/hr/departments");
+  }
+
   function openViolationRules() {
     router.push("/hr/violation-rules");
   }
@@ -556,6 +560,42 @@ export default function HrDashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Shifts
+            </button>
+
+            <button
+              type="button"
+              onClick={openDepartmentPolicies}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 12,
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                backgroundColor: "rgba(255, 255, 255, 0.15)",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                backdropFilter: "blur(10px)",
+                transition: "all 0.2s",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.25)";
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(0, 0, 0, 0.2)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.15)";
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+              }}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+              Departments
             </button>
 
             <button

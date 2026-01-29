@@ -37,7 +37,8 @@ import Shift from '../../../../models/Shift';
 import ViolationRules from '../../../../models/ViolationRules';
 import PaidLeave from '../../../../models/PaidLeave';
 import LeaveRecord from '../../../../models/LeaveRecord';
-import { normalizeStatus, extractShiftCode } from '../../../../lib/calculations';
+import Department from '../../../../models/Department';
+import { normalizeStatus, extractShiftCode, isSaturdayOffForEmployee, getSaturdayIndexInMonth } from '../../../../lib/calculations';
 import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts, getLeaveDeductionDays, getMissingPunchDeductionDays } from '../../../../lib/calculations';
 import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
 // Cache removed for simplicity and real-time data
@@ -449,16 +450,21 @@ export async function GET(req) {
 
         // OPTIMIZATION: Run queries in parallel for faster response
         // MongoDB will auto-select best index
-        const [shiftCount, employees] = await Promise.all([
+        const [shiftCount, employees, departmentDocs] = await Promise.all([
           Shift.countDocuments({ isActive: true })
             .maxTimeMS(1500), // Reduced timeout
           Employee.find()
-            .select('empCode name department designation shift shiftId monthlySalary')
+            .select('empCode name department designation shift shiftId monthlySalary saturdayGroup')
             .lean()
-            .maxTimeMS(2500) // Reduced timeout
+            .maxTimeMS(2500), // Reduced timeout
+          Department.find().select('name saturdayPolicy').lean().maxTimeMS(1500),
         ]);
         
         const useDynamicShifts = shiftCount > 0;
+        const departmentPolicyMap = new Map();
+        (departmentDocs || []).forEach((d) => {
+          if (d.name != null) departmentPolicyMap.set(String(d.name).trim(), d.saturdayPolicy || 'alternate');
+        });
 
     const monthStartDate = `${monthPrefix}-01`;
     const monthEndDate = `${monthPrefix}-${String(daysInMonth).padStart(2, '0')}`;
@@ -567,9 +573,8 @@ export async function GET(req) {
         let isWeekendOff = false;
         if (weekendInfo.isSunday) isWeekendOff = true; // Sunday
         if (weekendInfo.isSaturday) {
-          // alternate Saturdays off
           saturdayIndex++;
-          if (saturdayIndex % 2 === 1) isWeekendOff = true;
+          if (isSaturdayOffForEmployee(saturdayIndex, emp, departmentPolicyMap, emp.department || '')) isWeekendOff = true;
         }
 
         // Get shift for this date - use employee's current shift assignment (simplified, no history)
@@ -1321,21 +1326,26 @@ export async function POST(req) {
     const TZ = process.env.TIMEZONE_OFFSET || '+05:00';
 
     // OPTIMIZATION: Run queries in parallel for faster response
-    const [allShifts, emp] = await Promise.all([
+    const [allShifts, emp, departmentDocs] = await Promise.all([
       Shift.find({ isActive: true })
         .select('_id name code startTime endTime crossesMidnight gracePeriod')
         .lean()
         .maxTimeMS(1500),
       Employee.findOne({ empCode })
-        .select('empCode name shift shiftId department designation monthlySalary')
+        .select('empCode name shift shiftId department designation monthlySalary saturdayGroup')
         .lean()
-        .maxTimeMS(2000)
+        .maxTimeMS(2000),
+      Department.find().select('name saturdayPolicy').lean().maxTimeMS(1500),
     ]);
     
     const allShiftsMap = new Map();
     allShifts.forEach((s) => {
       allShiftsMap.set(s._id.toString(), s);
       allShiftsMap.set(s.code, s);
+    });
+    const departmentPolicyMap = new Map();
+    (departmentDocs || []).forEach((d) => {
+      if (d.name != null) departmentPolicyMap.set(String(d.name).trim(), d.saturdayPolicy || 'alternate');
     });
     if (!emp) {
       throw new NotFoundError(`Employee ${empCode}`);
@@ -1427,14 +1437,18 @@ export async function POST(req) {
     const localMs = dateObj.getTime() + COMPANY_OFFSET_MS;
     const local = new Date(localMs);
     const dow = local.getUTCDay(); // Day of week in company timezone
+    const [yearStr, monthStr, ddStr] = date.split('-');
+    const year = parseInt(yearStr, 10);
+    const monthIndex = parseInt(monthStr, 10) - 1;
+    const dayOfMonth = parseInt(ddStr, 10);
+    const firstParts = getCompanyLocalDateParts(year, monthIndex, 1);
+    const saturdayIndex = getSaturdayIndexInMonth(year, monthIndex, dayOfMonth, dow, firstParts.dow);
     
     let isWeekendOff = false;
     if (dow === 0) {
       isWeekendOff = true; // Sunday
     } else if (dow === 6) {
-      // Saturday: check if it's an alternating Saturday off
-      // For now, treat all Saturdays as off (can be customized)
-      isWeekendOff = true;
+      isWeekendOff = saturdayIndex == null ? true : isSaturdayOffForEmployee(saturdayIndex, emp, departmentPolicyMap, emp.department || '');
     }
 
     let rawStatus = status;
