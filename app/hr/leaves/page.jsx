@@ -32,16 +32,17 @@ export default function HrLeavesPage() {
 
   const [year, setYear] = useState(new Date().getFullYear());
   const [paidLeaves, setPaidLeaves] = useState([]);
+  const [leavesPerQuarter, setLeavesPerQuarter] = useState(6);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMarkLeaveModal, setShowMarkLeaveModal] = useState(false);
   const [markLeaveData, setMarkLeaveData] = useState({
     empCode: '',
     date: '',
-    leaveType: 'casual',
     reason: '',
   });
   const [toast, setToast] = useState({ type: '', text: '' });
+  const [viewDatesFor, setViewDatesFor] = useState(null); // { empCode, employeeName, quarter, quarterLabel, dates }
 
   function showToast(type, text) {
     setToast({ type, text });
@@ -53,11 +54,14 @@ export default function HrLeavesPage() {
   async function loadLeaves() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/hr/leaves?year=${year}`);
+      const res = await fetch(`/api/hr/leaves?year=${year}`, { cache: 'no-store' });
       if (res.ok) {
         const response = await res.json();
         if (response.success) {
           setPaidLeaves(response.data?.paidLeaves || []);
+          if (response.data?.leavesPerQuarter != null) {
+            setLeavesPerQuarter(response.data.leavesPerQuarter);
+          }
         } else {
           showToast('error', response.error || 'Failed to load leaves');
         }
@@ -76,9 +80,18 @@ export default function HrLeavesPage() {
     loadLeaves();
   }, [year]);
 
+  // Refetch when user returns to this tab (e.g. after changing leave on monthly sheet) so both pages stay in sync
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') loadLeaves();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [year]);
+
   async function handleMarkLeave() {
-    if (!markLeaveData.empCode || !markLeaveData.date || !markLeaveData.leaveType) {
-      showToast('error', 'Please fill all required fields');
+    if (!markLeaveData.empCode || !markLeaveData.date) {
+      showToast('error', 'Employee code and date are required');
       return;
     }
 
@@ -97,7 +110,7 @@ export default function HrLeavesPage() {
       if (res.ok && response.success) {
         showToast('success', 'Leave marked successfully');
         setShowMarkLeaveModal(false);
-        setMarkLeaveData({ empCode: '', date: '', leaveType: 'casual', reason: '' });
+        setMarkLeaveData({ empCode: '', date: '', reason: '' });
         loadLeaves();
       } else {
         showToast('error', response.error || response.message || 'Failed to mark leave');
@@ -110,7 +123,7 @@ export default function HrLeavesPage() {
     }
   }
 
-  async function handleRemoveLeave(empCode, date) {
+  async function handleRemoveLeave(empCode, date, onSuccess) {
     if (!confirm(`Remove leave for employee ${empCode} on ${date}?`)) return;
 
     setLoading(true);
@@ -123,6 +136,7 @@ export default function HrLeavesPage() {
       if (res.ok && response.success) {
         showToast('success', 'Leave removed successfully');
         loadLeaves();
+        onSuccess?.();
       } else {
         showToast('error', response.error || response.message || 'Failed to remove leave');
       }
@@ -134,7 +148,7 @@ export default function HrLeavesPage() {
     }
   }
 
-  // Filter leaves based on search query
+  // Filter leaves based on search query (quarter-based: paidLeaves have q1,q2,q3,q4)
   const filteredLeaves = paidLeaves.filter((leave) => {
     const query = searchQuery.toLowerCase();
     return (
@@ -192,6 +206,21 @@ export default function HrLeavesPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ThemeToggle />
+          <button
+            onClick={() => router.push('/hr/leave-policy')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.3)',
+              background: 'rgba(255,255,255,0.1)',
+              color: '#ffffff',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Leave Policy
+          </button>
           <button
             onClick={() => router.push('/hr/dashboard')}
             style={{
@@ -304,10 +333,10 @@ export default function HrLeavesPage() {
               <th style={thStyle}>Emp Code</th>
               <th style={thStyle}>Name</th>
               <th style={thStyle}>Department</th>
-              <th style={thStyle}>Casual</th>
-              <th style={thStyle}>Annual</th>
-              <th style={thStyle}>Total Taken</th>
-              <th style={thStyle}>Remaining</th>
+              <th style={thStyle}>Q1 (Jan–Mar)</th>
+              <th style={thStyle}>Q2 (Apr–Jun)</th>
+              <th style={thStyle}>Q3 (Jul–Sep)</th>
+              <th style={thStyle}>Q4 (Oct–Dec)</th>
               <th style={thStyle}>Actions</th>
             </tr>
           </thead>
@@ -325,62 +354,192 @@ export default function HrLeavesPage() {
                 </td>
               </tr>
             ) : (
-              filteredLeaves.map((leave, idx) => {
-                const remaining = leave.totalLeavesRemaining || 0;
-                const remainingColor = remaining > 10 ? colors.success : remaining > 5 ? '#fbbf24' : colors.error;
-                
-                return (
-                  <tr
-                    key={`${leave.empCode}-${leave.year}`}
-                    style={{
-                      backgroundColor: idx % 2 === 0 ? colors.background.table.row : colors.background.table.rowEven,
-                    }}
-                  >
-                    <td style={tdStyle}>{leave.empCode}</td>
-                    <td style={tdStyle}>{leave.employeeName || '-'}</td>
-                    <td style={tdStyle}>{leave.department || '-'}</td>
-                    <td style={tdStyle}>
-                      {leave.casualLeavesTaken || 0} / {leave.casualLeavesAllocated || 12}
-                    </td>
-                    <td style={tdStyle}>
-                      {leave.annualLeavesTaken || 0} / {leave.annualLeavesAllocated || 12}
-                    </td>
-                    <td style={tdStyle}>{leave.totalLeavesTaken || 0}</td>
-                    <td style={{ ...tdStyle, color: remainingColor, fontWeight: 600 }}>
-                      {remaining}
-                    </td>
-                    <td style={tdStyle}>
-                      <button
-                        onClick={() => {
-                          setMarkLeaveData({
-                            empCode: leave.empCode,
-                            date: '',
-                            leaveType: 'casual',
-                            reason: '',
-                          });
-                          setShowMarkLeaveModal(true);
-                        }}
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          border: `1px solid ${colors.primary}`,
-                          background: 'transparent',
-                          color: colors.primary,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                          marginRight: 8,
-                        }}
-                      >
-                        Mark Leave
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
+              filteredLeaves.map((leave, idx) => (
+                <tr
+                  key={`${leave.empCode}-${leave.year}`}
+                  style={{
+                    backgroundColor: idx % 2 === 0 ? colors.background.table.row : colors.background.table.rowEven,
+                  }}
+                >
+                  <td style={tdStyle}>{leave.empCode}</td>
+                  <td style={tdStyle}>{leave.employeeName || '-'}</td>
+                  <td style={tdStyle}>{leave.department || '-'}</td>
+                  <td style={tdStyle}>
+                    {leave.q1 ? (
+                      <span>
+                        {leave.q1.taken} / {leave.q1.allocated}
+                        {(leave.q1.dates?.length || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setViewDatesFor({ empCode: leave.empCode, employeeName: leave.employeeName, quarter: 1, quarterLabel: 'Q1 (Jan–Mar)', dates: leave.q1.dates || [] })}
+                            style={{ marginLeft: 6, fontSize: 11, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            View
+                          </button>
+                        )}
+                      </span>
+                    ) : `0 / ${leavesPerQuarter}`}
+                  </td>
+                  <td style={tdStyle}>
+                    {leave.q2 ? (
+                      <span>
+                        {leave.q2.taken} / {leave.q2.allocated}
+                        {(leave.q2.dates?.length || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setViewDatesFor({ empCode: leave.empCode, employeeName: leave.employeeName, quarter: 2, quarterLabel: 'Q2 (Apr–Jun)', dates: leave.q2.dates || [] })}
+                            style={{ marginLeft: 6, fontSize: 11, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            View
+                          </button>
+                        )}
+                      </span>
+                    ) : `0 / ${leavesPerQuarter}`}
+                  </td>
+                  <td style={tdStyle}>
+                    {leave.q3 ? (
+                      <span>
+                        {leave.q3.taken} / {leave.q3.allocated}
+                        {(leave.q3.dates?.length || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setViewDatesFor({ empCode: leave.empCode, employeeName: leave.employeeName, quarter: 3, quarterLabel: 'Q3 (Jul–Sep)', dates: leave.q3.dates || [] })}
+                            style={{ marginLeft: 6, fontSize: 11, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            View
+                          </button>
+                        )}
+                      </span>
+                    ) : `0 / ${leavesPerQuarter}`}
+                  </td>
+                  <td style={tdStyle}>
+                    {leave.q4 ? (
+                      <span>
+                        {leave.q4.taken} / {leave.q4.allocated}
+                        {(leave.q4.dates?.length || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setViewDatesFor({ empCode: leave.empCode, employeeName: leave.employeeName, quarter: 4, quarterLabel: 'Q4 (Oct–Dec)', dates: leave.q4.dates || [] })}
+                            style={{ marginLeft: 6, fontSize: 11, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            View
+                          </button>
+                        )}
+                      </span>
+                    ) : `0 / ${leavesPerQuarter}`}
+                  </td>
+                  <td style={tdStyle}>
+                    <button
+                      onClick={() => {
+                        setMarkLeaveData({ empCode: leave.empCode, date: '', reason: '' });
+                        setShowMarkLeaveModal(true);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        border: `1px solid ${colors.primary}`,
+                        background: 'transparent',
+                        color: colors.primary,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        marginRight: 8,
+                      }}
+                    >
+                      Mark Leave
+                    </button>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
+
+      {/* View leave dates modal (to see which dates are counted and remove wrong one) */}
+      {viewDatesFor && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setViewDatesFor(null)}
+        >
+          <div
+            style={{
+              background: colors.background.card,
+              borderRadius: 16,
+              padding: 24,
+              minWidth: 360,
+              maxWidth: 480,
+              border: `1px solid ${colors.border.default}`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: colors.text.primary }}>
+              Leave dates – {viewDatesFor.employeeName} ({viewDatesFor.empCode})
+            </h3>
+            <p style={{ fontSize: 12, color: colors.text.secondary, marginBottom: 12 }}>
+              {viewDatesFor.quarterLabel} – {viewDatesFor.dates.length} day(s). Remove the date that was marked by mistake.
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 240, overflowY: 'auto' }}>
+              {viewDatesFor.dates.map((date) => (
+                <li
+                  key={date}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 0',
+                    borderBottom: `1px solid ${colors.border.default}`,
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: colors.text.primary }}>{date}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveLeave(viewDatesFor.empCode, date, () => setViewDatesFor(null))}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 12,
+                      color: '#b91c1c',
+                      background: 'rgba(239,68,68,0.1)',
+                      border: '1px solid rgba(239,68,68,0.4)',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <button
+                type="button"
+                onClick={() => setViewDatesFor(null)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border.default}`,
+                  background: 'transparent',
+                  color: colors.text.primary,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mark Leave Modal */}
       {showMarkLeaveModal && (
@@ -411,7 +570,7 @@ export default function HrLeavesPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20, color: colors.text.primary }}>
-              Mark Paid Leave
+              Mark Paid Leave (policy: paid leaves per quarter set in Leave Policy)
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
@@ -435,7 +594,7 @@ export default function HrLeavesPage() {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, marginBottom: 6, color: colors.text.secondary }}>
-                  Date (YYYY-MM-DD) *
+                  Date *
                 </label>
                 <input
                   type="date"
@@ -454,33 +613,13 @@ export default function HrLeavesPage() {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, marginBottom: 6, color: colors.text.secondary }}>
-                  Leave Type *
+                  Reason (optional)
                 </label>
-                <select
-                  value={markLeaveData.leaveType}
-                  onChange={(e) => setMarkLeaveData({ ...markLeaveData, leaveType: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    border: `1px solid ${colors.border.default}`,
-                    background: colors.background.input,
-                    color: colors.text.primary,
-                    fontSize: 13,
-                  }}
-                >
-                  <option value="casual">Casual Leave</option>
-                  <option value="annual">Annual Leave</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 13, marginBottom: 6, color: colors.text.secondary }}>
-                  Reason (Optional)
-                </label>
-                <textarea
-                  value={markLeaveData.reason}
+                <input
+                  type="text"
+                  value={markLeaveData.reason || ''}
                   onChange={(e) => setMarkLeaveData({ ...markLeaveData, reason: e.target.value })}
-                  rows={3}
+                  placeholder="Optional"
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -489,7 +628,6 @@ export default function HrLeavesPage() {
                     background: colors.background.input,
                     color: colors.text.primary,
                     fontSize: 13,
-                    resize: 'vertical',
                   }}
                 />
               </div>

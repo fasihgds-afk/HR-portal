@@ -1,67 +1,80 @@
 // app/api/employee/leaves/route.js
+// Quarter-based paid leave; limit per quarter from LeavePolicy (configurable from HR frontend)
 import { connectDB } from '../../../../lib/db';
-import PaidLeave from '../../../../models/PaidLeave';
 import LeaveRecord from '../../../../models/LeaveRecord';
+import { getQuarterFromDate, getQuarterRange, getCurrentQuarter } from '../../../../lib/leave/quarterUtils';
+import { getLeavePolicy } from '../../../../lib/leave/getLeavePolicy';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
 import { ValidationError } from '../../../../lib/errors/errorHandler';
 
-// OPTIMIZATION: Node.js runtime for better connection pooling
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// GET /api/employee/leaves?empCode=XXXXX - Get employee leave balance
+// GET /api/employee/leaves?empCode=XXX&year=YYYY - Balance by quarter (current quarter + full year optional)
 export async function GET(req) {
   try {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
     const empCode = searchParams.get('empCode');
-    const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString(), 10);
+    const yearParam = searchParams.get('year');
+    const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();
 
     if (!empCode) {
       throw new ValidationError('empCode is required');
     }
 
-    // OPTIMIZATION: Run PaidLeave and LeaveRecord queries in parallel for faster response
+    const policy = await getLeavePolicy();
+    const leavesPerQuarter = policy.leavesPerQuarter;
+
+    const { year: currentYear, quarter: currentQuarter } = getCurrentQuarter();
+
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
-    
-    const [paidLeave, leaveHistory] = await Promise.all([
-      PaidLeave.getOrCreate(empCode, year),
-      LeaveRecord.find({
-        empCode,
-        date: { $gte: yearStart, $lte: yearEnd },
-      })
-        .select('date leaveType reason')
-        .sort({ date: -1 })
-        .lean()
-        .maxTimeMS(2000) // Reduced timeout
-    ]);
 
-    // Calculate summary
+    const leaveRecords = await LeaveRecord.find({
+      empCode,
+      date: { $gte: yearStart, $lte: yearEnd },
+      leaveType: 'paid',
+    })
+      .select('date reason')
+      .sort({ date: -1 })
+      .lean()
+      .maxTimeMS(2000);
+
+    const countByQuarter = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    leaveRecords.forEach((lr) => {
+      const { quarter } = getQuarterFromDate(lr.date);
+      if (countByQuarter[quarter] !== undefined) countByQuarter[quarter] += 1;
+    });
+
+    const quarters = [1, 2, 3, 4].map((q) => ({
+      quarter: q,
+      allocated: leavesPerQuarter,
+      taken: countByQuarter[q] || 0,
+      remaining: Math.max(0, leavesPerQuarter - (countByQuarter[q] || 0)),
+      ...getQuarterRange(year, q),
+    }));
+
+    const currentQuarterData = year === currentYear ? quarters[currentQuarter - 1] : null;
+
     const summary = {
-      totalAllocated: paidLeave.totalLeavesAllocated,
-      totalTaken: paidLeave.totalLeavesTaken,
-      totalRemaining: paidLeave.totalLeavesRemaining,
-      casual: {
-        allocated: paidLeave.casualLeavesAllocated,
-        taken: paidLeave.casualLeavesTaken,
-        remaining: paidLeave.casualLeavesRemaining,
-      },
-      annual: {
-        allocated: paidLeave.annualLeavesAllocated,
-        taken: paidLeave.annualLeavesTaken,
-        remaining: paidLeave.annualLeavesRemaining,
-      },
+      leavesPerQuarter,
+      currentQuarter: currentQuarterData
+        ? {
+            quarter: currentQuarter,
+            year: currentYear,
+            taken: currentQuarterData.taken,
+            remaining: currentQuarterData.remaining,
+            allocated: leavesPerQuarter,
+          }
+        : null,
+      quarters,
+      history: leaveRecords,
     };
 
     return successResponse(
-      {
-        empCode,
-        year,
-        summary,
-        history: leaveHistory,
-      },
+      { empCode, year, summary },
       'Leave balance retrieved successfully',
       HTTP_STATUS.OK
     );

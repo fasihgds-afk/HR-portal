@@ -1,190 +1,102 @@
 // app/api/hr/leaves/route.js
+// Quarter-based paid leave; limit per quarter from LeavePolicy (configurable from HR frontend)
 import { connectDB } from '../../../../lib/db';
-import PaidLeave from '../../../../models/PaidLeave';
+import PaidLeaveQuarter from '../../../../models/PaidLeaveQuarter';
 import LeaveRecord from '../../../../models/LeaveRecord';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Employee from '../../../../models/Employee';
+import { getQuarterFromDate, getQuarterLabel } from '../../../../lib/leave/quarterUtils';
+import { getLeavePolicy } from '../../../../lib/leave/getLeavePolicy';
 import { successResponse, errorResponseFromException, HTTP_STATUS } from '../../../../lib/api/response';
 import { ValidationError, NotFoundError } from '../../../../lib/errors/errorHandler';
 
-// OPTIMIZATION: Node.js runtime for better connection pooling
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// GET /api/hr/leaves - Get all employees' leave status
+// GET /api/hr/leaves?year=YYYY&empCode=XXX - List leave status by quarter for the year
 export async function GET(req) {
   try {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
     const year = parseInt(searchParams.get('year') || new Date().getFullYear().toString(), 10);
-    const empCode = searchParams.get('empCode'); // Optional: filter by employee
+    const empCodeFilter = (searchParams.get('empCode') || '').trim();
 
-    // Build query
-    const query = { year };
-    if (empCode) {
-      query.empCode = empCode;
-    }
-
-    // Get all paid leave records for the year (without lean to allow saving)
-    const paidLeaves = await PaidLeave.find(query)
-      .maxTimeMS(3000);
-
-    // If filtering by empCode and no record exists, create one
-    if (empCode && paidLeaves.length === 0) {
-      const paidLeave = await PaidLeave.getOrCreate(empCode, year);
-      const emp = await Employee.findOne({ empCode })
-        .select('empCode name department designation')
-        .lean()
-        .maxTimeMS(2000);
-      
-      return successResponse(
-        { 
-          paidLeaves: [{
-            ...paidLeave.toObject(),
-            employeeName: emp?.name || '',
-            department: emp?.department || '',
-            designation: emp?.designation || '',
-            totalLeavesAllocated: paidLeave.totalLeavesAllocated,
-            totalLeavesTaken: paidLeave.totalLeavesTaken,
-            totalLeavesRemaining: paidLeave.totalLeavesRemaining,
-            casualLeavesRemaining: paidLeave.casualLeavesRemaining,
-            annualLeavesRemaining: paidLeave.annualLeavesRemaining,
-          }] 
-        },
-        'Leave status retrieved successfully',
-        HTTP_STATUS.OK
-      );
-    }
-
-    // Get employee details for each paid leave record
-    const empCodes = paidLeaves.map(pl => pl.empCode);
-    const employees = await Employee.find({ empCode: { $in: empCodes } })
+    const employeeQuery = empCodeFilter ? { empCode: empCodeFilter } : {};
+    const employees = await Employee.find(employeeQuery)
       .select('empCode name department designation')
+      .sort({ department: 1, empCode: 1 })
       .lean()
       .maxTimeMS(3000);
 
-    const employeeMap = new Map();
-    employees.forEach(emp => {
-      employeeMap.set(emp.empCode, emp);
-    });
-
-    // STEP 1: Clean up duplicate LeaveRecords FIRST (same empCode and date) - keep only the first one
-    // This must happen BEFORE counting to ensure accurate counts
-    const allLeaveRecords = await LeaveRecord.find({
-      empCode: { $in: empCodes },
-      date: { $gte: `${year}-01-01`, $lte: `${year}-12-31` }
-    })
-      .sort({ createdAt: 1 })
-      .lean()
-      .maxTimeMS(3000);
-    
-    // Group by empCode-date to find duplicates
-    const leaveRecordsByKey = new Map();
-    const duplicatesToDelete = [];
-    
-    allLeaveRecords.forEach(record => {
-      const key = `${record.empCode}-${record.date}`;
-      if (leaveRecordsByKey.has(key)) {
-        // Duplicate found - mark for deletion (keep the first one)
-        duplicatesToDelete.push(record._id);
-      } else {
-        leaveRecordsByKey.set(key, record);
-      }
-    });
-    
-    // Delete duplicate records
-    if (duplicatesToDelete.length > 0) {
-      await LeaveRecord.deleteMany({ _id: { $in: duplicatesToDelete } });
+    if (employees.length === 0) {
+      return successResponse({ paidLeaves: [], year, quarters: [1, 2, 3, 4] }, 'Leave status retrieved', HTTP_STATUS.OK);
     }
 
-    // STEP 2: Get ShiftAttendance records with "Paid Leave" status to validate LeaveRecords
-    const paidLeaveAttendances = await ShiftAttendance.find({
+    const empCodes = employees.map((e) => e.empCode);
+    const policy = await getLeavePolicy();
+    const leavesPerQuarter = policy.leavesPerQuarter;
+
+    // LeaveRecords for this year: paid, casual, annual (quarter view shows all paid-type leaves)
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const leaveRecords = await LeaveRecord.find({
       empCode: { $in: empCodes },
-      date: { $gte: `${year}-01-01`, $lte: `${year}-12-31` },
-      attendanceStatus: 'Paid Leave'
+      date: { $gte: yearStart, $lte: yearEnd },
+      leaveType: { $in: ['paid', 'casual', 'annual'] },
     })
       .select('empCode date leaveType')
       .lean()
       .maxTimeMS(3000);
-    
-    // Create a map of valid paid leave dates (empCode-date)
-    const validPaidLeaveDates = new Set();
-    paidLeaveAttendances.forEach(sa => {
-      validPaidLeaveDates.add(`${sa.empCode}-${sa.date}`);
-    });
-    
-    // STEP 3: Clean up LeaveRecords that don't have matching "Paid Leave" status in ShiftAttendance
-    const orphanedLeaveRecords = [];
-    allLeaveRecords.forEach(record => {
-      const key = `${record.empCode}-${record.date}`;
-      if (!validPaidLeaveDates.has(key)) {
-        orphanedLeaveRecords.push(record._id);
+
+    // Normalize date to YYYY-MM-DD (handles string or Date from DB)
+    function toDateStr(d) {
+      if (!d) return '';
+      if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+      if (d instanceof Date && !Number.isNaN(d.getTime())) {
+        const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
       }
-    });
-    
-    if (orphanedLeaveRecords.length > 0) {
-      await LeaveRecord.deleteMany({ _id: { $in: orphanedLeaveRecords } });
+      return String(d).slice(0, 10);
     }
 
-    // STEP 4: Get actual LeaveRecord counts AFTER cleanup (only for dates with "Paid Leave" status)
-    const actualLeaveCounts = await LeaveRecord.aggregate([
-      {
-        $match: {
-          empCode: { $in: empCodes },
-          date: { $gte: `${year}-01-01`, $lte: `${year}-12-31` }
-        }
-      },
-      {
-        $group: {
-          _id: { empCode: '$empCode', leaveType: '$leaveType' },
-          count: { $sum: 1 }
-        }
-      }
-    ]).option({ maxTimeMS: 3000 });
-
-    // Build a map of actual counts
-    const actualCountsMap = new Map();
-    actualLeaveCounts.forEach(item => {
-      const key = `${item._id.empCode}-${item._id.leaveType}`;
-      actualCountsMap.set(key, item.count);
+    // Count and list dates per empCode per quarter (so HR can see which dates are counted and remove wrong ones)
+    const countByEmpQuarter = new Map();
+    const datesByEmpQuarter = new Map();
+    leaveRecords.forEach((lr) => {
+      const dateStr = toDateStr(lr.date);
+      if (!dateStr) return;
+      const { quarter } = getQuarterFromDate(dateStr);
+      const key = `${lr.empCode}-${quarter}`;
+      countByEmpQuarter.set(key, (countByEmpQuarter.get(key) || 0) + 1);
+      if (!datesByEmpQuarter.has(key)) datesByEmpQuarter.set(key, []);
+      datesByEmpQuarter.get(key).push(dateStr);
     });
+    // Sort dates in each list
+    datesByEmpQuarter.forEach((arr) => arr.sort());
 
-    // Enrich paid leave records with employee details and validate/correct counters
-    const enrichedLeaves = await Promise.all(paidLeaves.map(async (pl) => {
-      const emp = employeeMap.get(pl.empCode);
-      
-      // Get actual counts from LeaveRecord (after duplicate cleanup)
-      const actualCasual = actualCountsMap.get(`${pl.empCode}-casual`) || 0;
-      const actualAnnual = actualCountsMap.get(`${pl.empCode}-annual`) || 0;
-      
-      // Check if counters are out of sync and fix them
-      const casualMismatch = pl.casualLeavesTaken !== actualCasual;
-      const annualMismatch = pl.annualLeavesTaken !== actualAnnual;
-      
-      if (casualMismatch || annualMismatch) {
-        // Fix the counters to match actual LeaveRecord count
-        pl.casualLeavesTaken = actualCasual;
-        pl.annualLeavesTaken = actualAnnual;
-        await pl.save();
-      }
-      
-      return {
-        ...pl.toObject(),
-        employeeName: emp?.name || '',
-        department: emp?.department || '',
-        designation: emp?.designation || '',
-        // Calculate virtuals
-        totalLeavesAllocated: pl.totalLeavesAllocated,
-        totalLeavesTaken: pl.totalLeavesTaken,
-        totalLeavesRemaining: pl.totalLeavesRemaining,
-        casualLeavesRemaining: pl.casualLeavesRemaining,
-        annualLeavesRemaining: pl.annualLeavesRemaining,
+    const paidLeaves = [];
+    for (const emp of employees) {
+      const q1Taken = countByEmpQuarter.get(`${emp.empCode}-1`) || 0;
+      const q2Taken = countByEmpQuarter.get(`${emp.empCode}-2`) || 0;
+      const q3Taken = countByEmpQuarter.get(`${emp.empCode}-3`) || 0;
+      const q4Taken = countByEmpQuarter.get(`${emp.empCode}-4`) || 0;
+      const row = {
+        empCode: emp.empCode,
+        employeeName: emp.name || '',
+        department: emp.department || '',
+        designation: emp.designation || '',
+        year,
+        q1: { allocated: leavesPerQuarter, taken: q1Taken, remaining: Math.max(0, leavesPerQuarter - q1Taken), dates: datesByEmpQuarter.get(`${emp.empCode}-1`) || [] },
+        q2: { allocated: leavesPerQuarter, taken: q2Taken, remaining: Math.max(0, leavesPerQuarter - q2Taken), dates: datesByEmpQuarter.get(`${emp.empCode}-2`) || [] },
+        q3: { allocated: leavesPerQuarter, taken: q3Taken, remaining: Math.max(0, leavesPerQuarter - q3Taken), dates: datesByEmpQuarter.get(`${emp.empCode}-3`) || [] },
+        q4: { allocated: leavesPerQuarter, taken: q4Taken, remaining: Math.max(0, leavesPerQuarter - q4Taken), dates: datesByEmpQuarter.get(`${emp.empCode}-4`) || [] },
       };
-    }));
+      paidLeaves.push(row);
+    }
 
     return successResponse(
-      { paidLeaves: enrichedLeaves, year },
+      { paidLeaves, year, leavesPerQuarter },
       'Leave status retrieved successfully',
       HTTP_STATUS.OK
     );
@@ -193,108 +105,76 @@ export async function GET(req) {
   }
 }
 
-// POST /api/hr/leaves - Mark employee on paid leave
+// POST /api/hr/leaves - Mark paid leave (quarter-based; limit from LeavePolicy)
 export async function POST(req) {
   try {
     await connectDB();
 
+    const policy = await getLeavePolicy();
+    const leavesPerQuarter = policy.leavesPerQuarter;
+
     const body = await req.json();
-    const { empCode, date, leaveType, reason, markedBy } = body;
+    const { empCode, date, reason, markedBy } = body;
 
-    // Validation
-    if (!empCode || !date || !leaveType) {
-      throw new ValidationError('empCode, date, and leaveType are required');
+    if (!empCode || !date) {
+      throw new ValidationError('empCode and date are required');
     }
 
-    if (!['casual', 'annual'].includes(leaveType)) {
-      throw new ValidationError('leaveType must be "casual" or "annual"');
-    }
-
-    // Validate date format (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(date)) {
-      throw new ValidationError('date must be in YYYY-MM-DD format');
+      throw new ValidationError('date must be YYYY-MM-DD');
     }
 
-    // Get year from date
-    const year = parseInt(date.split('-')[0], 10);
+    const { year, quarter } = getQuarterFromDate(date);
 
-    // Check if employee exists
-    const employee = await Employee.findOne({ empCode })
-      .select('empCode name')
-      .lean()
-      .maxTimeMS(2000);
-
+    const employee = await Employee.findOne({ empCode }).select('empCode name').lean().maxTimeMS(2000);
     if (!employee) {
       throw new NotFoundError(`Employee ${empCode}`);
     }
 
-    // Check if leave record already exists for this date
-    const existingLeave = await LeaveRecord.findOne({ empCode, date })
-      .lean()
-      .maxTimeMS(2000);
-
+    const existingLeave = await LeaveRecord.findOne({ empCode, date }).lean().maxTimeMS(2000);
     if (existingLeave) {
       throw new ValidationError(`Leave already marked for employee ${empCode} on ${date}`);
     }
 
-    // Get or create paid leave record for the year
-    const paidLeave = await PaidLeave.getOrCreate(empCode, year);
-
-    // Check if employee has remaining leaves of the requested type
-    const leavesRemaining = leaveType === 'casual' 
-      ? paidLeave.casualLeavesRemaining 
-      : paidLeave.annualLeavesRemaining;
-
-    if (leavesRemaining <= 0) {
-      throw new ValidationError(`Employee ${empCode} has no remaining ${leaveType} leaves`);
+    const quarterRecord = await PaidLeaveQuarter.getOrCreate(empCode, year, quarter, leavesPerQuarter);
+    const maxAllowed = quarterRecord.leavesAllocated ?? leavesPerQuarter;
+    if (quarterRecord.leavesTaken >= maxAllowed) {
+      const quarterLabel = getQuarterLabel(year, quarter);
+      throw new ValidationError(
+        `This employee has used all ${maxAllowed} paid leaves for ${quarterLabel}. Per company policy, no additional paid leave can be granted for this quarter.`
+      );
     }
 
-    // Create leave record using upsert to prevent duplicates (atomic operation)
-    const leaveRecord = await LeaveRecord.findOneAndUpdate(
-      { empCode, date },
-      {
-        empCode,
-        date,
-        leaveType,
-        reason: reason || '',
-        markedBy: markedBy || 'HR',
-      },
-      { upsert: true, new: true }
-    );
+    await LeaveRecord.create({
+      empCode,
+      date,
+      leaveType: 'paid',
+      reason: reason || '',
+      markedBy: markedBy || 'HR',
+    });
 
-    // Update paid leave counter
-    if (leaveType === 'casual') {
-      paidLeave.casualLeavesTaken += 1;
-    } else {
-      paidLeave.annualLeavesTaken += 1;
-    }
-    await paidLeave.save();
+    quarterRecord.leavesTaken += 1;
+    await quarterRecord.save();
 
-    // Update ShiftAttendance record if it exists
     await ShiftAttendance.findOneAndUpdate(
       { empCode, date },
       {
         $set: {
           attendanceStatus: 'Paid Leave',
-          leaveType: leaveType,
-          reason: reason || `Paid ${leaveType} leave`,
+          leaveType: 'paid',
+          reason: reason || 'Paid leave',
         },
       },
       { upsert: true, new: true }
     );
 
+    const updated = await PaidLeaveQuarter.getOrCreate(empCode, year, quarter);
+
     return successResponse(
       {
-        leaveRecord,
-        paidLeave: {
-          ...paidLeave.toObject(),
-          totalLeavesAllocated: paidLeave.totalLeavesAllocated,
-          totalLeavesTaken: paidLeave.totalLeavesTaken,
-          totalLeavesRemaining: paidLeave.totalLeavesRemaining,
-          casualLeavesRemaining: paidLeave.casualLeavesRemaining,
-          annualLeavesRemaining: paidLeave.annualLeavesRemaining,
-        },
+        leaveRecord: { empCode, date, leaveType: 'paid', reason: reason || '', markedBy: markedBy || 'HR' },
+        quarter: { year, quarter, leavesTaken: updated.leavesTaken, leavesRemaining: updated.leavesRemaining },
       },
       'Leave marked successfully',
       HTTP_STATUS.CREATED
@@ -304,7 +184,7 @@ export async function POST(req) {
   }
 }
 
-// DELETE /api/hr/leaves - Remove/Unmark a leave
+// DELETE /api/hr/leaves?empCode=XXX&date=YYYY-MM-DD - Remove paid leave
 export async function DELETE(req) {
   try {
     await connectDB();
@@ -317,44 +197,27 @@ export async function DELETE(req) {
       throw new ValidationError('empCode and date are required');
     }
 
-    // Find and delete leave record
     const leaveRecord = await LeaveRecord.findOneAndDelete({ empCode, date });
-
     if (!leaveRecord) {
       throw new NotFoundError('Leave record not found');
     }
 
-    // Get year from date
-    const year = parseInt(date.split('-')[0], 10);
-
-    // Update paid leave counter (decrement)
-    const paidLeave = await PaidLeave.findOne({ empCode, year });
-
-    if (paidLeave) {
-      if (leaveRecord.leaveType === 'casual' && paidLeave.casualLeavesTaken > 0) {
-        paidLeave.casualLeavesTaken -= 1;
-      } else if (leaveRecord.leaveType === 'annual' && paidLeave.annualLeavesTaken > 0) {
-        paidLeave.annualLeavesTaken -= 1;
-      }
-      await paidLeave.save();
+    const { year, quarter } = getQuarterFromDate(date);
+    const quarterRecord = await PaidLeaveQuarter.findOne({ empCode, year, quarter });
+    if (quarterRecord && quarterRecord.leavesTaken > 0) {
+      quarterRecord.leavesTaken -= 1;
+      await quarterRecord.save();
     }
 
-    // Update ShiftAttendance record (remove leave type)
     await ShiftAttendance.findOneAndUpdate(
       { empCode, date },
       {
         $unset: { leaveType: '' },
-        $set: {
-          attendanceStatus: 'Absent', // Revert to absent if no other status
-        },
+        $set: { attendanceStatus: 'Absent' },
       }
     );
 
-    return successResponse(
-      { leaveRecord },
-      'Leave removed successfully',
-      HTTP_STATUS.OK
-    );
+    return successResponse({ leaveRecord }, 'Leave removed successfully', HTTP_STATUS.OK);
   } catch (err) {
     return errorResponseFromException(err, req);
   }

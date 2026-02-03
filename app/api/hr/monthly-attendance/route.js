@@ -35,9 +35,11 @@ import Employee from '../../../../models/Employee';
 import ShiftAttendance from '../../../../models/ShiftAttendance';
 import Shift from '../../../../models/Shift';
 import ViolationRules from '../../../../models/ViolationRules';
-import PaidLeave from '../../../../models/PaidLeave';
+import PaidLeaveQuarter from '../../../../models/PaidLeaveQuarter';
 import LeaveRecord from '../../../../models/LeaveRecord';
 import Department from '../../../../models/Department';
+import { getLeavePolicy } from '../../../../lib/leave/getLeavePolicy';
+import { getQuarterFromDate, getQuarterLabel } from '../../../../lib/leave/quarterUtils';
 import { normalizeStatus, extractShiftCode, isSaturdayOffForEmployee, getSaturdayIndexInMonth } from '../../../../lib/calculations';
 import { calculateViolationDeductions, calculateTotalDeductionDays, calculateSalaryAmounts, getLeaveDeductionDays, getMissingPunchDeductionDays } from '../../../../lib/calculations';
 import { memoize, createCacheKey } from '../../../../lib/utils/memoize';
@@ -485,6 +487,18 @@ export async function GET(req) {
       docsByEmpDate.set(`${doc.empCode}|${doc.date}`, doc);
     }
 
+    // Paid leave from HR Leaves (quarter-based): reflect on monthly sheet from LeaveRecord
+    const empCodes = employees.map((e) => e.empCode);
+    const leaveRecords = await LeaveRecord.find({
+      empCode: { $in: empCodes },
+      date: { $gte: monthStartDate, $lte: monthEndDate },
+      leaveType: 'paid',
+    })
+      .select('empCode date')
+      .lean()
+      .maxTimeMS(2000);
+    const paidLeaveKeys = new Set((leaveRecords || []).map((lr) => `${lr.empCode}|${lr.date}`));
+
     // OPTIMIZATION: Pre-fetch all shifts in parallel with other queries
     const allShiftsMap = new Map();
     if (useDynamicShifts) {
@@ -772,15 +786,16 @@ export async function GET(req) {
         let status;
 
         if (!doc) {
-          // no record at all → auto by weekend
-          status = isWeekendOff ? 'Holiday' : 'Absent';
+          // no record at all → auto by weekend, unless paid leave was marked in HR Leaves
+          status = paidLeaveKeys.has(key) ? 'Paid Leave' : (isWeekendOff ? 'Holiday' : 'Absent');
         } else {
           if (rawStatus) {
             status = normalizeStatus(rawStatus, { isWeekendOff });
           } else {
-            // HR did not set status; decide from punches
-            // If both punches are missing, mark as Absent
-            if (bothMissing && !isWeekendOff) {
+            // HR did not set status; decide from punches (or paid leave from HR Leaves)
+            if (paidLeaveKeys.has(key)) {
+              status = 'Paid Leave';
+            } else if (bothMissing && !isWeekendOff) {
               status = 'Absent';
             } else if (hasPunch) {
               status = 'Present';
@@ -791,6 +806,8 @@ export async function GET(req) {
             }
           }
         }
+        // Ensure HR Leaves (LeaveRecord) paid leave always reflects on monthly sheet
+        if (paidLeaveKeys.has(key)) status = 'Paid Leave';
 
         const reason = doc?.reason || '';
         
@@ -1045,7 +1062,7 @@ export async function GET(req) {
           excused: lateExcused || earlyExcused, // For backward compatibility
           lateExcused,
           earlyExcused,
-          leaveType: doc?.leaveType || null, // Paid leave type (casual/annual)
+          leaveType: doc?.leaveType || null, // Quarter-based: 'paid' only (no casual/annual)
           isFuture: false,
         });
       }
@@ -1270,33 +1287,6 @@ export async function GET(req) {
 // PAID LEAVE COUNTER HELPERS (defensive: counters never go below zero)
 // -----------------------------------------------------------------------------
 
-/**
- * Increment paid leave taken for the given type. Only increments if there is
- * remaining balance (same business rule as before).
- * @param {import('mongoose').Document} paidLeaveDoc - PaidLeave document (mutated)
- * @param {string} leaveType - 'casual' or 'annual'
- */
-function incrementPaidLeaveTaken(paidLeaveDoc, leaveType) {
-  if (leaveType === 'casual' && (paidLeaveDoc.casualLeavesAllocated || 0) - (paidLeaveDoc.casualLeavesTaken || 0) > 0) {
-    paidLeaveDoc.casualLeavesTaken = (paidLeaveDoc.casualLeavesTaken || 0) + 1;
-  } else if (leaveType === 'annual' && (paidLeaveDoc.annualLeavesAllocated || 0) - (paidLeaveDoc.annualLeavesTaken || 0) > 0) {
-    paidLeaveDoc.annualLeavesTaken = (paidLeaveDoc.annualLeavesTaken || 0) + 1;
-  }
-}
-
-/**
- * Decrement paid leave taken for the given type. Never goes below zero.
- * @param {import('mongoose').Document} paidLeaveDoc - PaidLeave document (mutated)
- * @param {string} leaveType - 'casual' or 'annual'
- */
-function decrementPaidLeaveTaken(paidLeaveDoc, leaveType) {
-  if (leaveType === 'casual') {
-    paidLeaveDoc.casualLeavesTaken = Math.max(0, (paidLeaveDoc.casualLeavesTaken || 0) - 1);
-  } else if (leaveType === 'annual') {
-    paidLeaveDoc.annualLeavesTaken = Math.max(0, (paidLeaveDoc.annualLeavesTaken || 0) - 1);
-  }
-}
-
 // -----------------------------------------------------------------------------
 // POST /api/hr/monthly-attendance
 // -----------------------------------------------------------------------------
@@ -1316,7 +1306,7 @@ export async function POST(req) {
       violationExcused, // Legacy: kept for backward compatibility
       lateExcused,
       earlyExcused,
-      leaveType, // casual or annual (only when status is Paid Leave)
+      leaveType, // 'paid' only (quarter-based; no casual/annual)
     } = body;
 
     if (!empCode || !date) {
@@ -1483,8 +1473,8 @@ export async function POST(req) {
       excused: finalExcused, // Legacy field for backward compatibility
       lateExcused: finalLateExcused,
       earlyExcused: finalEarlyExcused,
-      // Add leaveType if status is Paid Leave
-      ...(attendanceStatus === 'Paid Leave' && leaveType && { leaveType }),
+      // Quarter-based: store leaveType 'paid' only (no casual/annual)
+      ...(attendanceStatus === 'Paid Leave' && { leaveType: 'paid' }),
       updatedAt: new Date(),
     };
 
@@ -1506,76 +1496,58 @@ export async function POST(req) {
     try {
       await session.withTransaction(async () => {
         // -------------------------------------------------------------------------
-        // STATE TRANSITION: Normal → Paid Leave (new paid leave for this date)
+        // Quarter-based Paid Leave (no casual/annual): LeaveRecord + PaidLeaveQuarter
         // -------------------------------------------------------------------------
-        if (isPaidLeave && leaveType) {
-          const year = parseInt(date.split('-')[0], 10);
-          const paidLeave = await PaidLeave.getOrCreate(empCode, year, session);
-
-          if (!existingLeave) {
-            await LeaveRecord.findOneAndUpdate(
-              { empCode, date },
-              {
-                empCode,
-                date,
-                leaveType,
-                reason: reason || '',
-                markedBy: 'HR',
-              },
-              { upsert: true, new: true, session }
+        const effectiveLeaveType = (leaveType === 'casual' || leaveType === 'annual') ? 'paid' : (leaveType || 'paid');
+        if (isPaidLeave && effectiveLeaveType === 'paid') {
+          const policy = await getLeavePolicy();
+          const { year: qYear, quarter } = getQuarterFromDate(date);
+          const quarterRecord = await PaidLeaveQuarter.getOrCreate(empCode, qYear, quarter, policy.leavesPerQuarter, session);
+          const maxAllowed = quarterRecord.leavesAllocated ?? policy.leavesPerQuarter;
+          if (quarterRecord.leavesTaken >= maxAllowed) {
+            const quarterLabel = getQuarterLabel(qYear, quarter);
+            throw new ValidationError(
+              `This employee has used all ${maxAllowed} paid leaves for ${quarterLabel}. Per company policy, no additional paid leave can be granted for this quarter.`
             );
-            incrementPaidLeaveTaken(paidLeave, leaveType);
-            await paidLeave.save({ session });
-          } else if (existingLeave.leaveType !== leaveType) {
-            // -------------------------------------------------------------------------
-            // STATE TRANSITION: Paid Leave type change (casual ↔ annual)
-            // -------------------------------------------------------------------------
-            const oldLeaveType = existingLeave.leaveType;
-            decrementPaidLeaveTaken(paidLeave, oldLeaveType);
-            incrementPaidLeaveTaken(paidLeave, leaveType);
-            await LeaveRecord.findOneAndUpdate(
-              { empCode, date },
-              { leaveType, reason: reason || existingLeave.reason || '' },
+          }
+          if (!existingLeave) {
+            await LeaveRecord.create(
+              [{ empCode, date, leaveType: 'paid', reason: reason || '', markedBy: 'HR' }],
               { session }
             );
-            await paidLeave.save({ session });
+            quarterRecord.leavesTaken = (quarterRecord.leavesTaken || 0) + 1;
+            await quarterRecord.save({ session });
           }
         } else if (wasPaidLeave && !isPaidLeave) {
-          // -------------------------------------------------------------------------
-          // STATE TRANSITION: Paid Leave → Normal (revert to present/absent/etc.)
-          // -------------------------------------------------------------------------
           if (existingLeave) {
-            const year = parseInt(date.split('-')[0], 10);
-            const paidLeave = await PaidLeave.findOne({ empCode, year }).session(session);
-            if (paidLeave) {
-              decrementPaidLeaveTaken(paidLeave, existingLeave.leaveType);
-              await paidLeave.save({ session });
+            const { year: qYear, quarter } = getQuarterFromDate(date);
+            const quarterRecord = await PaidLeaveQuarter.findOne({ empCode, year: qYear, quarter }).session(session);
+            if (quarterRecord && quarterRecord.leavesTaken > 0) {
+              quarterRecord.leavesTaken -= 1;
+              await quarterRecord.save({ session });
             }
             await LeaveRecord.findOneAndDelete({ empCode, date }, { session });
           }
           delete update.leaveType;
         } else if (wasPaidLeave && isPaidLeave && !leaveType) {
-          // Still Paid Leave but leaveType not provided – keep or default
-          if (existingLeave) {
-            update.leaveType = existingLeave.leaveType;
-          } else {
-            const year = parseInt(date.split('-')[0], 10);
-            const paidLeave = await PaidLeave.getOrCreate(empCode, year, session);
-            const defaultLeaveType = (paidLeave.casualLeavesAllocated || 0) - (paidLeave.casualLeavesTaken || 0) > 0 ? 'casual' : 'annual';
-            update.leaveType = defaultLeaveType;
-            await LeaveRecord.findOneAndUpdate(
-              { empCode, date },
-              {
-                empCode,
-                date,
-                leaveType: defaultLeaveType,
-                reason: reason || '',
-                markedBy: 'HR',
-              },
-              { upsert: true, new: true, session }
+          update.leaveType = 'paid';
+          if (!existingLeave) {
+            const policy = await getLeavePolicy();
+            const { year: qYear, quarter } = getQuarterFromDate(date);
+            const quarterRecord = await PaidLeaveQuarter.getOrCreate(empCode, qYear, quarter, policy.leavesPerQuarter, session);
+            const maxAllowed = quarterRecord.leavesAllocated ?? policy.leavesPerQuarter;
+            if (quarterRecord.leavesTaken >= maxAllowed) {
+              const quarterLabel = getQuarterLabel(qYear, quarter);
+              throw new ValidationError(
+                `This employee has used all ${maxAllowed} paid leaves for ${quarterLabel}. Per company policy, no additional paid leave can be granted for this quarter.`
+              );
+            }
+            await LeaveRecord.create(
+              [{ empCode, date, leaveType: 'paid', reason: reason || '', markedBy: 'HR' }],
+              { session }
             );
-            incrementPaidLeaveTaken(paidLeave, defaultLeaveType);
-            await paidLeave.save({ session });
+            quarterRecord.leavesTaken = (quarterRecord.leavesTaken || 0) + 1;
+            await quarterRecord.save({ session });
           }
         }
 

@@ -291,7 +291,7 @@ export default function MonthlyHrPage() {
   const [selected, setSelected] = useState(null); // { emp, day }
 
   const [editStatus, setEditStatus] = useState('Present');
-  const [editLeaveType, setEditLeaveType] = useState('casual'); // casual or annual
+  const [editLeaveType, setEditLeaveType] = useState('paid'); // quarter-based: only paid leave (no casual/annual)
   const [editReason, setEditReason] = useState('');
   const [editCheckIn, setEditCheckIn] = useState('');
   const [editCheckOut, setEditCheckOut] = useState('');
@@ -404,7 +404,7 @@ export default function MonthlyHrPage() {
       
       const res = await fetch(url, {
         method: 'GET',
-        cache: forceRefresh ? 'no-store' : 'default', // Bypass browser cache if force refresh
+        cache: 'no-store', // Always fresh so changes from HR Leaves page reflect here
       });
 
       if (!res.ok) {
@@ -441,6 +441,15 @@ export default function MonthlyHrPage() {
   useEffect(() => {
     loadMonth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month]);
+
+  // Refetch when user returns to this tab (e.g. after changing leave on HR Leaves page) so both pages stay in sync
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') loadMonth(true);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [month]);
 
   function openCellModal(emp, day) {
@@ -497,8 +506,8 @@ export default function MonthlyHrPage() {
         lateExcused: editLateExcused,
         earlyExcused: editEarlyExcused,
         violationExcused: editLateExcused || editEarlyExcused, // Legacy: for backward compatibility
-        // Add leaveType when status is Paid Leave
-        ...(editStatus === 'Paid Leave' && { leaveType: editLeaveType }),
+        // Quarter-based: only 'paid' leave (no casual/annual)
+        ...(editStatus === 'Paid Leave' && { leaveType: 'paid' }),
       };
 
       // Saving with excused flags
@@ -511,7 +520,14 @@ export default function MonthlyHrPage() {
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `Failed to save day (${res.status})`);
+        let message = `Failed to save day (${res.status})`;
+        try {
+          const json = JSON.parse(text);
+          message = json.error || json.message || message;
+        } catch (_) {
+          if (text) message = text;
+        }
+        throw new Error(message);
       }
 
       showToast('success', 'Day updated successfully');
@@ -2111,11 +2127,6 @@ export default function MonthlyHrPage() {
                             >
                               <div style={{ fontSize: 10, marginBottom: 2 }}>
                                 {statusShortCode(day.status)}
-                                {day.status === 'Paid Leave' && day.leaveType && (
-                                  <span style={{ fontSize: 9, marginLeft: 2, opacity: 0.8 }}>
-                                    ({day.leaveType === 'casual' ? 'C' : 'A'})
-                                  </span>
-                                )}
                               </div>
                               <div style={{ fontSize: 10 }}>{punchLabel}</div>
                               {((day.late && (day.lateExcused !== undefined ? day.lateExcused : (day.excused && day.late))) ||
@@ -2302,34 +2313,10 @@ export default function MonthlyHrPage() {
                     </select>
                   </div>
 
-                  {/* Leave Type Selection - Only show when Paid Leave is selected */}
+                  {/* Paid Leave uses quarter-based policy (no casual/annual); set via HR Leaves or here */}
                   {editStatus === 'Paid Leave' && (
-                    <div
-                      style={{
-                        flex: 1,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 4,
-                      }}
-                    >
-                      <label style={{ fontSize: 11, fontWeight: 600 }}>
-                        Leave Type *
-                      </label>
-                      <select
-                        value={editLeaveType}
-                        onChange={(e) => setEditLeaveType(e.target.value)}
-                        style={{
-                          padding: '8px 10px',
-                          borderRadius: 8,
-                          border: '1px solid #cbd5f5',
-                          backgroundColor: '#ffffff',
-                          fontSize: 13,
-                          outline: 'none',
-                        }}
-                      >
-                        <option value="casual">Casual Leave</option>
-                        <option value="annual">Annual Leave</option>
-                      </select>
+                    <div style={{ flex: 1, fontSize: 12, color: '#64748b' }}>
+                      Paid leave counts against this quarter’s balance (see HR → Leaves).
                     </div>
                   )}
 

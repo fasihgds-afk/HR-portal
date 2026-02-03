@@ -19,10 +19,9 @@ const ShiftAttendanceSchema = new mongoose.Schema(
     attendanceStatus: { type: String }, // Present / Absent / Leave / etc.
     reason: { type: String },
 
-    // Paid leave type (null if not on paid leave, 'casual' or 'annual' if on paid leave)
+    // Paid leave type (null if not on paid leave; 'paid' = quarter-based, 'casual'/'annual' = legacy)
     leaveType: {
       type: String,
-      enum: [null, 'casual', 'annual'],
       default: null,
     },
 

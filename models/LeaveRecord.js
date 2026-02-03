@@ -6,16 +6,14 @@ const LeaveRecordSchema = new mongoose.Schema(
     empCode: {
       type: String,
       required: true,
-      index: true,
     },
     date: {
       type: String, // YYYY-MM-DD format
       required: true,
-      index: true,
     },
     leaveType: {
       type: String,
-      enum: ['casual', 'annual'],
+      enum: ['casual', 'annual', 'paid'], // 'paid' = quarter-based (6 per quarter)
       required: true,
     },
     reason: {
@@ -32,14 +30,11 @@ const LeaveRecordSchema = new mongoose.Schema(
   }
 );
 
-// Compound index for fast lookups by empCode and date
+// Compound unique index for fast lookups by empCode and date
 LeaveRecordSchema.index({ empCode: 1, date: 1 }, { unique: true });
 
-// Index for date range queries
+// Index for date range queries (year-based reports)
 LeaveRecordSchema.index({ date: 1 });
-
-// Index for year-based queries (for yearly reports)
-LeaveRecordSchema.index({ empCode: 1, date: 1 });
 
 const LeaveRecord = mongoose.models.LeaveRecord || mongoose.model('LeaveRecord', LeaveRecordSchema);
 
