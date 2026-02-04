@@ -2,6 +2,7 @@
 import "./globals.css";
 import { Providers } from "./providers";
 import MobileOnlyGuard from "@/components/guards/MobileOnlyGuard";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 export const metadata = {
   title: "GDS Attendance Portal",
@@ -24,6 +25,7 @@ export default function RootLayout({ children }) {
           {/* ✅ Now the whole app (including /login) is wrapped in SessionProvider */}
           <Providers>{children}</Providers>
         </MobileOnlyGuard>
+        <SpeedInsights />
       </body>
     </html>
   );
