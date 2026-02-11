@@ -34,13 +34,21 @@ from pynput import mouse, keyboard
 
 # ─── HTTP Session (connection pooling — reuses TCP connections) ───
 # Much faster and lighter than opening a new connection every heartbeat
+from urllib3.util.retry import Retry
+
+_retry_strategy = Retry(
+    total=3,               # Retry up to 3 times
+    backoff_factor=1,      # Wait 1s, 2s, 4s between retries
+    status_forcelist=[502, 503, 504],  # Retry on server errors
+    allowed_methods=["POST", "PATCH"],
+)
 _http = requests.Session()
-_http.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=2))
-_http.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=2))
+_http.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
+_http.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
 
 # ─── Constants ────────────────────────────────────────────────────
 
-AGENT_VERSION = "1.5.0"
+AGENT_VERSION = "1.6.0"
 IDLE_THRESHOLD_SEC = 180       # No activity for 180s (3 min) → IDLE
 HEARTBEAT_INTERVAL_SEC = 180   # Send heartbeat every 3 minutes
 MOVE_THROTTLE_SEC = 0.5        # Only record mouse move every 500ms (saves huge CPU)
@@ -92,6 +100,15 @@ def resource_path(relative_path):
         base = Path(__file__).parent
     return str(base / relative_path)
 
+
+# ─── Safe print (no crash when --noconsole) ──────────────────────
+
+def safe_print(*args, **kwargs):
+    """Print that never crashes, even with --noconsole (no stdout)."""
+    try:
+        print(*args, **kwargs)
+    except Exception:
+        pass
 
 # ─── Logging (minimal) ───────────────────────────────────────────
 
@@ -753,6 +770,29 @@ def start_listeners(tracker, idle_popup=None):
     keyboard_listener.start()
 
     log.info("Input listeners started (activity + pattern detection — no keylogging)")
+
+    # ── Watchdog: restart listeners if they die ───────
+    def listener_watchdog():
+        nonlocal mouse_listener, keyboard_listener
+        while True:
+            time.sleep(30)
+            try:
+                if not mouse_listener.is_alive():
+                    log.warning("Mouse listener died — restarting")
+                    mouse_listener = mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll)
+                    mouse_listener.daemon = True
+                    mouse_listener.start()
+                if not keyboard_listener.is_alive():
+                    log.warning("Keyboard listener died — restarting")
+                    keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+                    keyboard_listener.daemon = True
+                    keyboard_listener.start()
+            except Exception as e:
+                log.error("Listener watchdog error: %s", e)
+
+    wd = threading.Thread(target=listener_watchdog, daemon=True)
+    wd.start()
+
     return mouse_listener, keyboard_listener
 
 
@@ -1199,23 +1239,30 @@ def main_loop(config, tracker, idle_popup):
             log.info("Agent stopped by user (Ctrl+C)")
             break
         except Exception as e:
-            log.error("Unexpected error in main loop: %s", e)
+            log.error("Unexpected error in main loop: %s", e, exc_info=True)
+            # Reset HTTP session on repeated errors (stale connection fix)
+            try:
+                _http.close()
+                _http.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
+                _http.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
+            except Exception:
+                pass
             time.sleep(10)
 
 
 # ─── Entry Point ──────────────────────────────────────────────────
 
 def main():
-    print("=" * 55)
-    print("  GDS Attendance & Break Monitor — Agent v" + AGENT_VERSION)
-    print("  PRIVACY: Only activity signals (ACTIVE/IDLE)")
-    print("  NO screenshots, NO keylogging, NO file access")
-    print("=" * 55)
-    print()
+    safe_print("=" * 55)
+    safe_print("  GDS Attendance & Break Monitor — Agent v" + AGENT_VERSION)
+    safe_print("  PRIVACY: Only activity signals (ACTIVE/IDLE)")
+    safe_print("  NO screenshots, NO keylogging, NO file access")
+    safe_print("=" * 55)
+    safe_print()
 
     # ── Prevent duplicate instances ────────────────────
     if not ensure_single_instance():
-        print("Agent is already running. Exiting.")
+        safe_print("Agent is already running. Exiting.")
         sys.exit(0)
 
     config = load_config()
@@ -1243,8 +1290,8 @@ def main():
     # Start system lock monitor
     start_lock_monitor(tracker)
 
-    print("Agent is running in background.")
-    print("Press Ctrl+C to stop.\n")
+    safe_print("Agent is running in background.")
+    safe_print("Press Ctrl+C to stop.\n")
 
     # Start heartbeat loop (blocks)
     main_loop(config, tracker, idle_popup)
@@ -1259,43 +1306,55 @@ def main():
 def run_with_auto_restart():
     """
     Wrapper that auto-restarts the agent if it crashes.
-    Waits 10 seconds between restart attempts.
-    Max 5 consecutive crashes before giving up (prevents infinite loop).
+    NEVER gives up — the agent must always be running during the shift.
+    Crash counter resets if the agent ran for 2+ minutes (not a boot-loop).
     """
-    max_crashes = 5
     crash_count = 0
-    crash_window = 300  # Reset crash count if running for 5+ minutes
+    crash_window = 120  # Reset crash count if agent ran for 2+ minutes
+    max_rapid_crashes = 10  # Only pause longer after 10 rapid crashes
     
-    while crash_count < max_crashes:
+    while True:
         start_time = time.time()
         try:
             main()
             break  # Clean exit — don't restart
         except KeyboardInterrupt:
-            print("\nAgent stopped by user.")
+            safe_print("\nAgent stopped by user.")
             break
-        except SystemExit:
-            break  # Intentional exit
+        except SystemExit as e:
+            # Only break on intentional exit (single-instance check)
+            if str(e) == "0":
+                break
+            # Other SystemExit (errors) — restart
+            log.error("Agent SystemExit: %s", e)
         except Exception as e:
             elapsed = time.time() - start_time
-            log.error("Agent crashed: %s", e)
+            log.error("Agent crashed after %.0fs: %s", elapsed, e, exc_info=True)
             
             if elapsed > crash_window:
-                crash_count = 0  # Was running fine, reset counter
+                crash_count = 0  # Was running fine — not a boot-loop
             
             crash_count += 1
-            if crash_count < max_crashes:
-                wait = min(10 * crash_count, 60)  # 10s, 20s, 30s... max 60s
-                log.info("Restarting in %ds (crash %d/%d)...", wait, crash_count, max_crashes)
-                time.sleep(wait)
+            
+            if crash_count >= max_rapid_crashes:
+                # Lots of rapid crashes — wait longer but DON'T give up
+                wait = 120  # 2 minutes
+                log.warning("Many rapid crashes (%d). Waiting %ds before retry...", crash_count, wait)
             else:
-                log.error("Too many crashes (%d). Agent stopped.", max_crashes)
-                try:
-                    import traceback
-                    traceback.print_exc()
-                    input("\nPress Enter to exit...")
-                except Exception:
-                    pass
+                wait = min(10 * crash_count, 60)  # 10s, 20s, 30s... max 60s
+            
+            log.info("Restarting in %ds (crash %d)...", wait, crash_count)
+            time.sleep(wait)
+            
+            # Reset HTTP session on restart (prevent stale connections)
+            try:
+                global _http
+                _http.close()
+                _http = requests.Session()
+                _http.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
+                _http.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=2, max_retries=_retry_strategy))
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
