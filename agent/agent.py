@@ -1195,11 +1195,12 @@ def main_loop(config, tracker, idle_popup):
                 was_locked_handled = False  # reset so we catch the next unlock
 
             # ── Idle → Show popup ────────────────────────
+            # Only re-show after IDLE_THRESHOLD_SEC since last popup.
+            # last_popup_time resets to 0 when employee becomes ACTIVE,
+            # so (now - 0) is always >= 180 → first idle triggers immediately.
             if current_state == "IDLE" and not idle_popup.is_open:
-                just_went_idle = last_state == "ACTIVE"
-                idle_long_enough = (now - last_popup_time) >= IDLE_THRESHOLD_SEC
-
-                if just_went_idle or idle_long_enough:
+                time_since_popup = now - last_popup_time
+                if time_since_popup >= IDLE_THRESHOLD_SEC:
                     last_popup_time = now
                     log.info("Employee is IDLE — showing break reason popup")
                     threading.Thread(target=idle_popup.show_popup, daemon=True).start()
