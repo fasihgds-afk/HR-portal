@@ -68,7 +68,7 @@ export async function POST(request) {
     const openBreak = await BreakLog.findOne({ empCode: empCode.trim(), endedAt: null });
     if (openBreak) {
       openBreak.endedAt = new Date();
-      openBreak.durationMin = Math.round((openBreak.endedAt - openBreak.startedAt) / 60000);
+      openBreak.durationMin = Math.max(0, Math.round((openBreak.endedAt - openBreak.startedAt) / 60000));
       await openBreak.save();
     }
 
@@ -154,9 +154,9 @@ export async function PATCH(request) {
     // ── Step 3: End break (employee became ACTIVE) ────────────
     // Also handles legacy agents that don't send "action"
     openBreak.endedAt = new Date();
-    openBreak.durationMin = Math.round(
+    openBreak.durationMin = Math.max(0, Math.round(
       (openBreak.endedAt - openBreak.startedAt) / 60000
-    );
+    ));
     await openBreak.save();
 
     return NextResponse.json({

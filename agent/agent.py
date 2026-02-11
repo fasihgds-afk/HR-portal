@@ -25,7 +25,7 @@ import ctypes
 import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 
 import requests
@@ -368,7 +368,7 @@ def gui_enroll():
     # Server URL
     tk.Label(body, text="Server URL", font=("Segoe UI", 11, "bold"),
              bg=THEME["bg_darkest"], fg=THEME["text_primary"]).pack(anchor="w")
-    url_var = tk.StringVar(value="https://ams.globaldigitsolutions.com")
+    url_var = tk.StringVar(value="https://hr-portal-beryl.vercel.app")
     url_entry = tk.Entry(body, textvariable=url_var, font=("Segoe UI", 12),
                          bg=THEME["bg_input"], fg=THEME["text_primary"],
                          insertbackground=THEME["text_primary"],
@@ -1001,7 +1001,7 @@ class IdlePopup:
         Break stays open until employee becomes ACTIVE again.
         """
         url = f"{self._config['serverUrl']}/api/agent/break-log"
-        started_iso = datetime.fromtimestamp(self._popup_show_time).isoformat()
+        started_iso = datetime.fromtimestamp(self._popup_show_time, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
         payload = {
             "deviceId": self._config["deviceId"],

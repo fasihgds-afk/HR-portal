@@ -32,8 +32,8 @@ const BREAK_ALLOWANCE = {
 };
 
 function getBreakDuration(b, now) {
-  if (b.endedAt) return b.durationMin || 0;
-  return Math.round((now - new Date(b.startedAt).getTime()) / 60000);
+  if (b.endedAt) return Math.max(0, b.durationMin || 0);
+  return Math.max(0, Math.round((now - new Date(b.startedAt).getTime()) / 60000));
 }
 
 function addDays(dateStr, days) {
