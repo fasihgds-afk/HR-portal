@@ -234,6 +234,10 @@ export default function HrDashboardPage() {
     router.push("/hr/complaints");
   }
 
+  function openLiveMonitoring() {
+    router.push("/hr/monitoring");
+  }
+
   function openRegisterModal() {
     setShowRegisterModal(true);
   }
@@ -250,6 +254,10 @@ export default function HrDashboardPage() {
   return (
     <>
       <style jsx>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.3); }
+        }
         @media (max-width: 768px) {
           .header-container {
             flex-direction: column !important;
@@ -1846,6 +1854,111 @@ export default function HrDashboardPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   Open Complaints
+                </button>
+              </div>
+
+              {/* LIVE MONITORING CARD */}
+              <div
+                style={{
+                  borderRadius: 14,
+                  padding: "18px",
+                  background: colors.gradient.card,
+                  border: `1px solid rgba(6, 182, 212, 0.3)`,
+                  boxShadow: theme === 'dark' 
+                    ? "0 8px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)"
+                    : "0 8px 24px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)",
+                  transition: "all 0.3s",
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-4px)";
+                  e.currentTarget.style.boxShadow = "0 12px 32px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05)";
+                  e.currentTarget.style.borderColor = "rgba(6, 182, 212, 0.5)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)";
+                  e.currentTarget.style.borderColor = "rgba(6, 182, 212, 0.3)";
+                }}
+              >
+                {/* Live pulse indicator */}
+                <div style={{ position: "absolute", top: 12, right: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{
+                    width: 8, height: 8, borderRadius: "50%", backgroundColor: "#22d3ee",
+                    animation: "pulse 2s ease-in-out infinite",
+                  }} />
+                  <span style={{ fontSize: 9, color: "#22d3ee", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Live</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: "linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.1))",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: "1px solid rgba(6, 182, 212, 0.3)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <svg width="20" height="20" fill="none" stroke="#06b6d4" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 2, color: colors.text.primary }}>Live Monitoring</h3>
+                    <p style={{ fontSize: 10, color: colors.text.muted, margin: 0 }}>
+                      Real-time employee status
+                    </p>
+                  </div>
+                </div>
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: colors.text.muted,
+                    marginBottom: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Track employee activity in real-time. View active, idle & break status, productivity scores, and suspicious activity alerts.
+                </p>
+                <button
+                  type="button"
+                  onClick={openLiveMonitoring}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "linear-gradient(135deg, #06b6d4, #0891b2)",
+                    color: "#ffffff",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    boxShadow: "0 4px 12px rgba(6, 182, 212, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    width: "100%",
+                    justifyContent: "center",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow = "0 6px 16px rgba(6, 182, 212, 0.4)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = "0 4px 12px rgba(6, 182, 212, 0.3)";
+                  }}
+                >
+                  <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Open Live Monitor
                 </button>
               </div>
             </div>

@@ -1727,6 +1727,38 @@ export default function EmployeeDashboardPage() {
             </button>
             <button
               type="button"
+              onClick={() => router.push('/employee/productivity')}
+              style={{
+                padding: "9px 18px",
+                borderRadius: 8,
+                border: "1px solid rgba(6, 182, 212, 0.4)",
+                backgroundColor: "rgba(6, 182, 212, 0.15)",
+                color: "#22d3ee",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(6, 182, 212, 0.2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                transition: "all 0.2s",
+                whiteSpace: "nowrap",
+                height: "36px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(6, 182, 212, 0.4)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(6, 182, 212, 0.2)";
+              }}
+            >
+              📊 My Productivity
+            </button>
+            <button
+              type="button"
               onClick={async () => {
                 try {
                   await signOut({ 
