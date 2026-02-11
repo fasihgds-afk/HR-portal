@@ -64,12 +64,13 @@ export async function POST(request) {
       };
     }
 
-    // Close any existing open break (safety net — prevents duplicates)
-    const openBreak = await BreakLog.findOne({ empCode: empCode.trim(), endedAt: null });
-    if (openBreak) {
-      openBreak.endedAt = new Date();
-      openBreak.durationMin = Math.max(0, Math.round((openBreak.endedAt - openBreak.startedAt) / 60000));
-      await openBreak.save();
+    // Close ALL existing open breaks (safety net — prevents duplicates & orphans)
+    const openBreaks = await BreakLog.find({ empCode: empCode.trim(), endedAt: null });
+    const closeTime = new Date();
+    for (const ob of openBreaks) {
+      ob.endedAt = closeTime;
+      ob.durationMin = Math.max(0, Math.round((ob.endedAt - ob.startedAt) / 60000));
+      await ob.save();
     }
 
     // Create new OPEN break
