@@ -28,6 +28,12 @@ const ShiftAttendanceSchema = new mongoose.Schema(
     late: { type: Boolean, default: false },
     earlyLeave: { type: Boolean, default: false },
 
+    // Anti-auto-clicker: activity quality metrics
+    avgActivityScore: { type: Number, default: null },     // 0-100, average for the day
+    suspiciousMinutes: { type: Number, default: 0 },       // Minutes flagged as suspicious
+    _scoreSum: { type: Number, default: 0 },               // Internal: sum of scores for avg calc
+    _scoreCount: { type: Number, default: 0 },             // Internal: count of scores
+
     excused: { type: Boolean, default: false }, // Legacy: kept for backward compatibility
     lateExcused: { type: Boolean, default: false }, // Separate excused for late
     earlyExcused: { type: Boolean, default: false }, // Separate excused for early

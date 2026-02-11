@@ -33,8 +33,8 @@ const ShiftSchema = new mongoose.Schema(
     },
     gracePeriod: {
       type: Number,
-      default: 15,
-      // Grace period in minutes (default 15 minutes)
+      default: 20,
+      // Grace period in minutes (default 20 minutes)
     },
     isActive: {
       type: Boolean,

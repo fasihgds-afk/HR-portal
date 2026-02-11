@@ -46,3 +46,11 @@ next-app/node_modules/
 
 # sync-service (optional; exclude from repo if not needed)
 /sync-service/
+
+# Python agent
+agent/venv/
+agent/config.json
+agent/agent.log
+agent/build/
+agent/dist/
+agent/*.spec
