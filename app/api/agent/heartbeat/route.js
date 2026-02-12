@@ -129,11 +129,13 @@ export async function POST(request) {
 
     let attendance = await ShiftAttendance.findOne(filter);
 
+    // Grace period: use ?? (nullish coalescing) so an explicit 0 is respected
+    const gracePeriodMin = shift.gracePeriod ?? 20;
+    const graceEnd = new Date(shiftStart.getTime() + gracePeriodMin * 60 * 1000);
+
     if (!attendance) {
       // First heartbeat for this shift day — create the record
-      const isLate =
-        state === 'ACTIVE' &&
-        now > new Date(shiftStart.getTime() + (shift.gracePeriod || 20) * 60 * 1000);
+      const isLate = state === 'ACTIVE' && now > graceEnd;
 
       attendance = await ShiftAttendance.create({
         date: attendanceDate,
@@ -167,8 +169,7 @@ export async function POST(request) {
     // Record already exists — update only if needed
     if (state === 'ACTIVE' && !attendance.checkIn) {
       // First ACTIVE signal today — set checkIn
-      const isLate =
-        now > new Date(shiftStart.getTime() + (shift.gracePeriod || 20) * 60 * 1000);
+      const isLate = now > graceEnd;
 
       attendance.checkIn = now;
       attendance.attendanceStatus = 'Present';
