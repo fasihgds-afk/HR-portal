@@ -1067,24 +1067,28 @@ class IdlePopup:
             "startedAt": started_iso,
         }
 
-        try:
-            resp = _http.post(url, json=payload, timeout=15)
-            if resp.status_code == 200:
-                log.info("Break opened in DB (form appeared)")
-                with self._popup_lock:
-                    self._break_active = True
-                return True
-            else:
-                log.warning("Break start failed: HTTP %d", resp.status_code)
-                return False
-        except Exception as e:
-            log.warning("Break start network error: %s", e)
-            return False
+        for attempt in range(3):
+            try:
+                resp = _http.post(url, json=payload, timeout=20)
+                if resp.status_code == 200:
+                    log.info("Break opened in DB (form appeared)")
+                    with self._popup_lock:
+                        self._break_active = True
+                    return True
+                else:
+                    log.warning("Break start failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
+            except Exception as e:
+                log.warning("Break start error (attempt %d): %s", attempt + 1, e)
+            if attempt < 2:
+                time.sleep(2)
+
+        log.error("Break start FAILED after 3 attempts")
+        return False
 
     def _send_break_reason(self, reason, custom_reason):
         """
         Step 2: Update the open break with the employee's chosen reason.
-        Called when the form is submitted.
+        Called when the form is submitted. Retries up to 3 times.
         """
         url = f"{self._config['serverUrl']}/api/agent/break-log"
 
@@ -1097,22 +1101,26 @@ class IdlePopup:
             "customReason": custom_reason,
         }
 
-        try:
-            resp = _http.patch(url, json=payload, timeout=15)
-            if resp.status_code == 200:
-                log.info("Break reason updated: %s — %s", reason, custom_reason)
-                return True
-            else:
-                log.warning("Break reason update failed: HTTP %d", resp.status_code)
-                return False
-        except Exception as e:
-            log.warning("Break reason update error: %s", e)
-            return False
+        for attempt in range(3):
+            try:
+                resp = _http.patch(url, json=payload, timeout=20)
+                if resp.status_code == 200:
+                    log.info("Break reason updated: %s — %s", reason, custom_reason)
+                    return True
+                else:
+                    log.warning("Break reason update failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
+            except Exception as e:
+                log.warning("Break reason update error (attempt %d): %s", attempt + 1, e)
+            if attempt < 2:
+                time.sleep(2)  # Wait 2s before retry
+
+        log.error("Break reason update FAILED after 3 attempts")
+        return False
 
     def send_break_end(self):
         """
         Step 3: Close the open break when employee becomes ACTIVE.
-        Sets endedAt = now, calculates duration.
+        Sets endedAt = now, calculates duration. Retries up to 3 times.
         """
         with self._popup_lock:
             if not self._break_active:
@@ -1127,15 +1135,21 @@ class IdlePopup:
             "action": "end-break",
         }
 
-        try:
-            resp = _http.patch(url, json=payload, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                log.info("Break ended: %s", data.get("message", ""))
-            else:
-                log.warning("Break end failed: HTTP %d", resp.status_code)
-        except Exception as e:
-            log.warning("Break end network error: %s", e)
+        for attempt in range(3):
+            try:
+                resp = _http.patch(url, json=payload, timeout=20)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    log.info("Break ended: %s", data.get("message", ""))
+                    return
+                else:
+                    log.warning("Break end failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
+            except Exception as e:
+                log.warning("Break end error (attempt %d): %s", attempt + 1, e)
+            if attempt < 2:
+                time.sleep(2)
+
+        log.error("Break end FAILED after 3 attempts")
 
 
 # ─── Heartbeat Sender ────────────────────────────────────────────

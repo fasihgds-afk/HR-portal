@@ -11,13 +11,14 @@ export async function GET() {
   try {
     await connectDB();
 
-    // Find breaks with suspicious durations (negative, or very long: > 240 min = 4 hrs)
-    // Also find any breaks still open (endedAt = null) from old test data
+    // Find breaks with suspicious durations, orphaned open breaks, and stale "Pending" reasons
     const badBreaks = await BreakLog.find({
       $or: [
         { durationMin: { $lt: 0 } },           // Negative durations (timezone bug)
         { durationMin: { $gte: 240 } },         // Unrealistically long (4+ hrs) 
+        { durationMin: 0, reason: { $ne: 'Pending' } }, // 0-min breaks (corrupt)
         { endedAt: null },                      // Orphaned open breaks
+        { reason: 'Pending' },                  // Reason update never completed
       ],
     }).lean();
 
@@ -25,7 +26,9 @@ export async function GET() {
       totalBadBreaks: badBreaks.length,
       negative: badBreaks.filter(b => (b.durationMin || 0) < 0).length,
       tooLong: badBreaks.filter(b => (b.durationMin || 0) >= 240).length,
+      zeroMin: badBreaks.filter(b => b.durationMin === 0 && b.reason !== 'Pending').length,
       orphaned: badBreaks.filter(b => !b.endedAt).length,
+      pending: badBreaks.filter(b => b.reason === 'Pending').length,
       byEmployee: {},
     };
 
@@ -50,7 +53,9 @@ export async function GET() {
       $or: [
         { durationMin: { $lt: 0 } },
         { durationMin: { $gte: 240 } },
+        { durationMin: 0, reason: { $ne: 'Pending' } },
         { endedAt: null },
+        { reason: 'Pending' },
       ],
     });
 
