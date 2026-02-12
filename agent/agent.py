@@ -568,15 +568,30 @@ class ActivityTracker:
 
         total_events = key_count + mouse_count + scroll_count
 
-        # Not enough data to judge — assume genuine
-        if total_events < 5:
+        # If zero events AND buffers empty → truly no data, can't judge
+        if total_events == 0 and len(click_times) < 3:
             self._last_score = 100
             return 100
 
-        # ── Signal 1: Click interval variance (25 pts) ────
+        # ── Signal 0: Activity density (20 pts) ──────────
+        # Real active work generates 30+ events per 3 minutes (mouse moves,
+        # keyboard presses, scrolls). An auto-clicker doing 1 click / 2 min
+        # generates only 1-2 events per period — extremely low for "ACTIVE" state.
+        density_score = 20
+        if total_events < 3:
+            density_score = 0       # Almost no events while "ACTIVE" → very suspicious
+        elif total_events < 8:
+            density_score = 5
+        elif total_events < 15:
+            density_score = 10
+        elif total_events < 25:
+            density_score = 15
+        # else: 20 (healthy)
+
+        # ── Signal 1: Click interval variance (20 pts) ────
         # Real humans have random intervals. Auto-clickers are perfectly timed.
-        interval_score = 25
-        if len(click_times) >= 5:
+        interval_score = 20
+        if len(click_times) >= 3:  # Use accumulated buffer (not just per-period)
             intervals = [click_times[i] - click_times[i - 1] for i in range(1, len(click_times))]
             if intervals:
                 mean_interval = sum(intervals) / len(intervals)
@@ -589,20 +604,20 @@ class ActivityTracker:
                     if cv < 0.05:       # Almost zero variance → auto-clicker
                         interval_score = 0
                     elif cv < 0.10:
-                        interval_score = 5
+                        interval_score = 4
                     elif cv < 0.15:
-                        interval_score = 10
+                        interval_score = 8
                     elif cv < 0.20:
-                        interval_score = 15
+                        interval_score = 12
                     elif cv < 0.30:
-                        interval_score = 20
+                        interval_score = 16
                     else:
-                        interval_score = 25  # Natural randomness
+                        interval_score = 20  # Natural randomness
 
-        # ── Signal 2: Mouse position diversity (25 pts) ────
+        # ── Signal 2: Mouse position diversity (20 pts) ────
         # Real humans click many different positions. Auto-clickers repeat same spot.
-        position_score = 25
-        if len(click_positions) >= 5:
+        position_score = 20
+        if len(click_positions) >= 3:  # Use accumulated buffer
             unique_positions = set()
             for x, y in click_positions:
                 # Bucket to 20px grid (ignore tiny jitter)
@@ -613,20 +628,20 @@ class ActivityTracker:
             if diversity < 0.05:       # Almost all same spot
                 position_score = 0
             elif diversity < 0.10:
-                position_score = 5
+                position_score = 4
             elif diversity < 0.20:
-                position_score = 10
+                position_score = 8
             elif diversity < 0.40:
-                position_score = 15
+                position_score = 12
             elif diversity < 0.60:
-                position_score = 20
+                position_score = 16
             else:
-                position_score = 25  # Good variety
+                position_score = 20  # Good variety
 
-        # ── Signal 3: Keyboard+Mouse mix (25 pts) ──────────
+        # ── Signal 3: Keyboard+Mouse mix (20 pts) ──────────
         # Real work uses BOTH keyboard and mouse. Auto-clickers use only mouse.
-        mix_score = 25
-        if total_events > 10:
+        mix_score = 20
+        if total_events > 3:  # Lower threshold to catch low-frequency clickers
             key_ratio = key_count / total_events
             has_scroll = scroll_count > 0
 
@@ -634,18 +649,18 @@ class ActivityTracker:
                 # Mouse-only with no keyboard or scroll → very suspicious
                 mix_score = 0
             elif key_count == 0:
-                mix_score = 8  # Has scroll but no keyboard
+                mix_score = 6  # Has scroll but no keyboard
             elif key_ratio < 0.05:
-                mix_score = 12
+                mix_score = 10
             elif key_ratio < 0.10:
-                mix_score = 18
+                mix_score = 15
             else:
-                mix_score = 25  # Healthy mix
+                mix_score = 20  # Healthy mix
 
-        # ── Signal 4: Movement naturalness (25 pts) ────────
+        # ── Signal 4: Movement naturalness (20 pts) ────────
         # Real mouse movement has curves. Auto-clickers teleport or move linearly.
-        move_score = 25
-        if len(move_positions) >= 10:
+        move_score = 20
+        if len(move_positions) >= 5:  # Lower threshold
             # Check for "teleporting" — large jumps with no intermediate positions
             distances = []
             speeds = []
@@ -667,15 +682,15 @@ class ActivityTracker:
                     if speed_cv < 0.05:     # Constant speed = robotic
                         move_score = 0
                     elif speed_cv < 0.10:
-                        move_score = 5
+                        move_score = 4
                     elif speed_cv < 0.20:
-                        move_score = 12
+                        move_score = 10
                     elif speed_cv < 0.30:
-                        move_score = 18
+                        move_score = 15
                     else:
-                        move_score = 25  # Natural acceleration patterns
+                        move_score = 20  # Natural acceleration patterns
 
-        total_score = interval_score + position_score + mix_score + move_score
+        total_score = density_score + interval_score + position_score + mix_score + move_score
         self._last_score = total_score
         return total_score
 
