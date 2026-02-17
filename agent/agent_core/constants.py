@@ -2,7 +2,7 @@
 Constants, thresholds, theme colors, and break reason categories.
 """
 
-AGENT_VERSION = "1.7.0"
+AGENT_VERSION = "2.0.0"
 
 # ─── Thresholds ──────────────────────────────────────────────────
 IDLE_THRESHOLD_SEC = 180       # No activity for 180s (3 min) → IDLE

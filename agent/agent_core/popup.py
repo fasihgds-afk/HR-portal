@@ -1,99 +1,82 @@
 """
-IdlePopup — Fullscreen break reason form shown when employee goes IDLE.
-Styled with GDS portal dark theme and company branding.
-Employee MUST select a category AND type a reason — form will NOT close otherwise.
+IdlePopup — fullscreen break reason form.
+
+Created and managed EXCLUSIVELY on the Tkinter main thread.
+Never instantiated from a background thread.
+
+Network calls (break_reason) are dispatched to a worker thread,
+with result polling via root.after() — the UI never blocks.
 """
 
 import time
 import threading
 import tkinter as tk
-from datetime import datetime, timezone
 
 from .constants import THEME, BREAK_REASONS
 from .config import log, resource_path
-from .http_client import http
+from .api import send_break_reason
 
 
 class IdlePopup:
     """
-    HYBRID break tracking:
-      1. Form appears  → break STARTS (POST to DB, reason = "Pending")
-      2. Form submitted → reason SAVED (PATCH reason onto open break)
-      3. Employee works → break ENDS  (PATCH endedAt from main_loop)
+    Lifecycle (all on main thread):
+      show()         → creates Toplevel, calls on_shown callback
+      _on_submit()   → validates, starts async API call, polls for result
+      _finish()      → destroys Toplevel, calls on_submitted callback
     """
 
-    def __init__(self, config, tracker):
+    def __init__(self, root, config, on_submitted):
+        """
+        Args:
+            root:          The hidden Tk() root (parent for Toplevel).
+            config:        Agent config dict (serverUrl, deviceId, etc.).
+            on_submitted:  Callback(reason, custom_reason) called after successful submit.
+        """
+        self._root = root
         self._config = config
-        self._tracker = tracker
-        self._popup_open = False
-        self._popup_lock = threading.Lock()
-        self._break_active = False
-        self._popup_show_time = 0
-        self.popup_showing = False  # Public flag to suppress activity tracking
+        self._on_submitted = on_submitted
+        self._toplevel = None
+        self._submit_result = None  # None=pending, True=ok, False=failed
 
     @property
-    def is_open(self):
-        with self._popup_lock:
-            return self._popup_open
+    def is_visible(self):
+        return self._toplevel is not None
 
-    @property
-    def break_active(self):
-        with self._popup_lock:
-            return self._break_active
+    def show(self):
+        """Show the fullscreen popup. Must be called from main thread."""
+        if self._toplevel is not None:
+            return  # Already showing — idempotent guard
 
-    def show_popup(self):
-        """Show the fullscreen idle reason popup. Blocks until submitted."""
-        with self._popup_lock:
-            if self._popup_open:
-                return
-            self._popup_open = True
+        self._submit_result = None
+        top = tk.Toplevel(self._root)
+        self._toplevel = top
+        top.title("GDS Attendance Monitor \u2014 Break Reason")
+        top.configure(bg=THEME["bg_darkest"])
 
-        self._popup_show_time = time.time()
-        self.popup_showing = True
-        log.info("Break timer started (form appeared)")
+        # Fullscreen + always on top
+        top.attributes("-fullscreen", True)
+        top.attributes("-topmost", True)
 
-        # Step 1: Create open break in DB
-        self._send_break_start()
-
-        try:
-            self._run_popup()
-        except Exception as e:
-            log.error("Popup error: %s", e)
-        finally:
-            self.popup_showing = False
-            with self._popup_lock:
-                self._popup_open = False
-
-    def _run_popup(self):
-        """Create and run the fullscreen popup window."""
-        root = tk.Tk()
-        root.title("GDS Attendance Monitor \u2014 Break Reason")
-        root.configure(bg=THEME["bg_darkest"])
-
-        # FULLSCREEN
-        root.attributes("-fullscreen", True)
-        root.attributes("-topmost", True)
-
-        # Keep always on top (don't call focus_force — it steals Entry focus)
+        # Re-enforce topmost every second (without focus_force — that steals Entry focus)
         def stay_on_top():
             try:
-                root.attributes("-topmost", True)
-                root.lift()
-                root.after(1000, stay_on_top)
-            except Exception:
-                pass
-        root.after(500, stay_on_top)
+                top.attributes("-topmost", True)
+                top.lift()
+                top.after(1000, stay_on_top)
+            except tk.TclError:
+                pass  # Window destroyed
+        top.after(500, stay_on_top)
 
-        # Block closing
-        root.protocol("WM_DELETE_WINDOW", lambda: None)
-        root.bind("<Alt-F4>", lambda e: "break")
-        root.bind("<Escape>", lambda e: "break")
+        # Block all close attempts
+        top.protocol("WM_DELETE_WINDOW", lambda: None)
+        top.bind("<Alt-F4>", lambda e: "break")
+        top.bind("<Escape>", lambda e: "break")
 
         # Center card
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_columnconfigure(0, weight=1)
+        top.grid_rowconfigure(0, weight=1)
+        top.grid_columnconfigure(0, weight=1)
 
-        card = tk.Frame(root, bg=THEME["bg_card"], padx=0, pady=0,
+        card = tk.Frame(top, bg=THEME["bg_card"],
                         highlightbackground=THEME["border"], highlightthickness=2)
         card.grid(row=0, column=0)
 
@@ -110,7 +93,7 @@ class IdlePopup:
             logo_img = tk.PhotoImage(file=logo_path)
             scale = max(1, logo_img.width() // 45)
             logo_img = logo_img.subsample(scale, scale)
-            root._logo = logo_img
+            top._logo = logo_img  # prevent GC
             tk.Label(header_inner, image=logo_img,
                      bg=THEME["header_bg"]).pack(side="left", padx=(0, 12))
         except Exception:
@@ -126,10 +109,10 @@ class IdlePopup:
                  bg=THEME["header_bg"]).pack(anchor="w")
 
         # ─── Idle banner ─────────────────────────
-        idle_banner = tk.Frame(card, bg=THEME["warning"], height=40)
-        idle_banner.pack(fill="x")
-        idle_banner.pack_propagate(False)
-        tk.Label(idle_banner, text="\u26a0  You Are Currently Idle",
+        banner = tk.Frame(card, bg=THEME["warning"], height=40)
+        banner.pack(fill="x")
+        banner.pack_propagate(False)
+        tk.Label(banner, text="\u26a0  You Are Currently Idle",
                  font=("Segoe UI", 13, "bold"), fg="#1e293b",
                  bg=THEME["warning"]).pack(pady=8)
 
@@ -141,89 +124,60 @@ class IdlePopup:
                  font=("Segoe UI", 12, "bold"),
                  bg=THEME["bg_card"], fg=THEME["text_primary"]).pack(anchor="w", pady=(0, 10))
 
-        reason_var = tk.StringVar(value="")
-        custom_var = tk.StringVar(value="")
+        self._reason_var = tk.StringVar(value="")
+        self._custom_var = tk.StringVar(value="")
 
-        # Radio buttons
         radio_frame = tk.Frame(body, bg=THEME["bg_card"])
         radio_frame.pack(fill="x")
 
         for reason in BREAK_REASONS:
             rb = tk.Radiobutton(
-                radio_frame, text=reason, variable=reason_var, value=reason,
+                radio_frame, text=reason, variable=self._reason_var, value=reason,
                 font=("Segoe UI", 13), bg=THEME["bg_card"],
                 fg=THEME["text_primary"], activebackground=THEME["bg_hover"],
                 activeforeground=THEME["text_primary"],
                 selectcolor=THEME["bg_input"],
                 anchor="w", padx=15, pady=4,
-                command=lambda: submit_btn.config(state="normal"),
+                command=lambda: self._submit_btn.config(state="normal"),
             )
             rb.pack(fill="x", pady=1)
 
-        # Reason text input
         tk.Label(body, text="Enter reason (required):",
                  font=("Segoe UI", 12, "bold"),
                  bg=THEME["bg_card"], fg=THEME["text_primary"]).pack(anchor="w", pady=(16, 6))
 
-        reason_entry = tk.Entry(body, textvariable=custom_var,
-                                font=("Segoe UI", 12), width=45,
-                                bg=THEME["bg_input"], fg=THEME["text_primary"],
-                                insertbackground=THEME["text_primary"],
-                                relief="solid", borderwidth=1,
-                                highlightbackground=THEME["border"],
-                                highlightcolor=THEME["primary"])
-        reason_entry.pack(fill="x", pady=(0, 4))
+        self._reason_entry = tk.Entry(
+            body, textvariable=self._custom_var,
+            font=("Segoe UI", 12), width=45,
+            bg=THEME["bg_input"], fg=THEME["text_primary"],
+            insertbackground=THEME["text_primary"],
+            relief="solid", borderwidth=1,
+            highlightbackground=THEME["border"],
+            highlightcolor=THEME["primary"],
+        )
+        self._reason_entry.pack(fill="x", pady=(0, 4))
 
         tk.Label(body,
                  text="e.g. Meeting with manager, Lunch, Zuhr prayer, etc.",
                  font=("Segoe UI", 9),
                  bg=THEME["bg_card"], fg=THEME["text_dark"]).pack(anchor="w")
 
-        # Status + Submit
-        status_label = tk.Label(body, text="", font=("Segoe UI", 10),
-                                bg=THEME["bg_card"])
-        status_label.pack(pady=(10, 0))
+        self._status_label = tk.Label(body, text="", font=("Segoe UI", 10),
+                                      bg=THEME["bg_card"])
+        self._status_label.pack(pady=(10, 0))
 
-        submit_btn = tk.Button(body, text="Submit Break Reason",
-                               font=("Segoe UI", 14, "bold"),
-                               bg=THEME["primary"], fg="white",
-                               activebackground=THEME["primary_hover"],
-                               activeforeground="white",
-                               relief="flat", padx=30, pady=12,
-                               state="disabled", cursor="hand2")
+        self._submit_btn = tk.Button(
+            body, text="Submit Break Reason",
+            font=("Segoe UI", 14, "bold"),
+            bg=THEME["primary"], fg="white",
+            activebackground=THEME["primary_hover"],
+            activeforeground="white",
+            relief="flat", padx=30, pady=12,
+            state="disabled", cursor="hand2",
+            command=self._on_submit,
+        )
+        self._submit_btn.pack(pady=(12, 0), fill="x")
 
-        def on_submit():
-            reason = reason_var.get()
-            custom = custom_var.get().strip()
-
-            if not reason:
-                status_label.config(text="Please select a category.", fg=THEME["error"])
-                return
-            if not custom:
-                status_label.config(text="Please type your reason \u2014 it is required.",
-                                    fg=THEME["error"])
-                reason_entry.focus_set()
-                return
-
-            status_label.config(text="Submitting...", fg=THEME["primary"])
-            submit_btn.config(state="disabled")
-
-            success = self._send_break_reason(reason, custom)
-
-            if success:
-                elapsed = round((time.time() - self._popup_show_time) / 60)
-                status_label.config(
-                    text=f"Submitted! Idle so far: {elapsed} min. Closing...",
-                    fg=THEME["success"])
-                root.after(500, root.quit)
-            else:
-                status_label.config(text="Server error. Please try again.", fg=THEME["error"])
-                submit_btn.config(state="normal")
-
-        submit_btn.config(command=on_submit)
-        submit_btn.pack(pady=(12, 0), fill="x")
-
-        # Footer
         footer = tk.Frame(card, bg=THEME["bg_card"], height=40)
         footer.pack(fill="x")
         footer.pack_propagate(False)
@@ -232,108 +186,64 @@ class IdlePopup:
                  font=("Segoe UI", 9), bg=THEME["bg_card"],
                  fg=THEME["text_dark"]).pack(pady=10)
 
-        # Run (blocks until submitted)
-        root.mainloop()
+        log.info("Popup shown (main thread)")
 
-        try:
-            root.destroy()
-        except Exception:
-            pass
-
-    # ─── Break API calls ─────────────────────────────────────
-
-    def _send_break_start(self):
-        """Step 1: Create an open break in DB when form appears."""
-        url = f"{self._config['serverUrl']}/api/agent/break-log"
-        started_iso = (
-            datetime.fromtimestamp(self._popup_show_time, tz=timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
-
-        payload = {
-            "deviceId": self._config["deviceId"],
-            "deviceToken": self._config["deviceToken"],
-            "empCode": self._config["empCode"],
-            "reason": "Pending",
-            "customReason": "Waiting for employee to submit reason",
-            "startedAt": started_iso,
-        }
-
-        for attempt in range(3):
+    def hide(self):
+        """Destroy the popup Toplevel. Must be called from main thread."""
+        if self._toplevel is not None:
             try:
-                resp = http.post(url, json=payload, timeout=20)
-                if resp.status_code == 200:
-                    log.info("Break opened in DB (form appeared)")
-                    with self._popup_lock:
-                        self._break_active = True
-                    return True
-                else:
-                    log.warning("Break start failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
-            except Exception as e:
-                log.warning("Break start error (attempt %d): %s", attempt + 1, e)
-            if attempt < 2:
-                time.sleep(2)
+                self._toplevel.destroy()
+            except Exception:
+                pass
+            self._toplevel = None
 
-        log.error("Break start FAILED after 3 attempts")
-        return False
+    # ─── Submit flow (non-blocking) ──────────────────────────
 
-    def _send_break_reason(self, reason, custom_reason):
-        """Step 2: Update the open break with employee's chosen reason."""
-        url = f"{self._config['serverUrl']}/api/agent/break-log"
+    def _on_submit(self):
+        """Validate → start async API call → poll for result."""
+        reason = self._reason_var.get()
+        custom = self._custom_var.get().strip()
 
-        payload = {
-            "deviceId": self._config["deviceId"],
-            "deviceToken": self._config["deviceToken"],
-            "empCode": self._config["empCode"],
-            "action": "update-reason",
-            "reason": reason,
-            "customReason": custom_reason,
-        }
+        if not reason:
+            self._status_label.config(text="Please select a category.", fg=THEME["error"])
+            return
+        if not custom:
+            self._status_label.config(
+                text="Please type your reason \u2014 it is required.", fg=THEME["error"])
+            self._reason_entry.focus_set()
+            return
 
-        for attempt in range(3):
-            try:
-                resp = http.patch(url, json=payload, timeout=20)
-                if resp.status_code == 200:
-                    log.info("Break reason updated: %s \u2014 %s", reason, custom_reason)
-                    return True
-                else:
-                    log.warning("Break reason update failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
-            except Exception as e:
-                log.warning("Break reason update error (attempt %d): %s", attempt + 1, e)
-            if attempt < 2:
-                time.sleep(2)
+        # Disable UI, show spinner
+        self._submit_btn.config(state="disabled")
+        self._status_label.config(text="Submitting...", fg=THEME["primary"])
+        self._submit_result = None
 
-        log.error("Break reason update FAILED after 3 attempts")
-        return False
+        # Capture values now (fresh, not stale)
+        config = self._config
+        r, c = reason, custom
 
-    def send_break_end(self):
-        """Step 3: Close the open break when employee becomes ACTIVE."""
-        with self._popup_lock:
-            if not self._break_active:
-                return
-            self._break_active = False
+        def do_call():
+            self._submit_result = send_break_reason(config, r, c)
 
-        url = f"{self._config['serverUrl']}/api/agent/break-log"
-        payload = {
-            "deviceId": self._config["deviceId"],
-            "deviceToken": self._config["deviceToken"],
-            "empCode": self._config["empCode"],
-            "action": "end-break",
-        }
+        threading.Thread(target=do_call, daemon=True).start()
+        self._poll_submit(reason, custom)
 
-        for attempt in range(3):
-            try:
-                resp = http.patch(url, json=payload, timeout=20)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    log.info("Break ended: %s", data.get("message", ""))
-                    return
-                else:
-                    log.warning("Break end failed (attempt %d): HTTP %d", attempt + 1, resp.status_code)
-            except Exception as e:
-                log.warning("Break end error (attempt %d): %s", attempt + 1, e)
-            if attempt < 2:
-                time.sleep(2)
+    def _poll_submit(self, reason, custom):
+        """Poll for API result without blocking the main thread."""
+        if self._submit_result is None:
+            # Still waiting — check again in 100ms
+            self._root.after(100, lambda: self._poll_submit(reason, custom))
+            return
 
-        log.error("Break end FAILED after 3 attempts")
+        if self._submit_result:
+            self._status_label.config(text="Submitted! Closing...", fg=THEME["success"])
+            self._root.after(400, lambda: self._finish(reason, custom))
+        else:
+            self._status_label.config(text="Server error. Please try again.", fg=THEME["error"])
+            self._submit_btn.config(state="normal")
+
+    def _finish(self, reason, custom):
+        """Close popup and notify the app."""
+        self.hide()
+        if self._on_submitted:
+            self._on_submitted(reason, custom)
