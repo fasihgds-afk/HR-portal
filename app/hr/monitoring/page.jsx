@@ -36,7 +36,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function ScoreBadge({ score, flagged }) {
+function ScoreBadge({ score, suspicious }) {
   if (score === null || score === undefined) {
     return <span style={{ color: '#64748b', fontSize: 12 }}>-</span>;
   }
@@ -56,7 +56,7 @@ function ScoreBadge({ score, flagged }) {
         backgroundColor: bg, color,
       }}>
         {score}
-        {flagged && <span style={{ fontSize: 10, marginLeft: 2 }} title="Flagged for HR review">⚠</span>}
+        {suspicious && <span style={{ fontSize: 10, marginLeft: 2 }} title="Suspicious activity detected">⚠</span>}
       </span>
       <span style={{ fontSize: 10, color, opacity: 0.8 }}>{label}</span>
     </div>
@@ -114,17 +114,14 @@ export default function MonitoringPage() {
   const employees = data?.employees || [];
   const filtered = filter === 'ALL'
     ? employees
-    : filter === 'FLAGGED'
-      ? employees.filter(e => e.flagged)
-      : filter === 'SUSPICIOUS'
-        ? employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.avgActivityScore !== null && e.avgActivityScore < 30))
-        : employees.filter(e => e.liveStatus === filter);
+    : filter === 'SUSPICIOUS'
+      ? employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.suspiciousMinutes > 0))
+      : employees.filter(e => e.liveStatus === filter);
 
   const totalActive = employees.filter(e => e.liveStatus === 'ACTIVE').length;
   const totalIdle = employees.filter(e => e.liveStatus === 'IDLE').length;
   const totalOffline = employees.filter(e => e.liveStatus === 'OFFLINE').length;
-  const totalSuspicious = employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.avgActivityScore !== null && e.avgActivityScore < 30)).length;
-  const totalFlagged = employees.filter(e => e.flagged).length;
+  const totalSuspicious = employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.suspiciousMinutes > 0)).length;
 
   // Theme-aware styles
   const bgPrimary = colors?.background?.primary || '#020617';
@@ -190,14 +187,13 @@ export default function MonitoringPage() {
       </div>
 
       {/* Summary Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 24 }}>
         {[
           { label: 'Total', value: employees.length, color: '#3b82f6', filterVal: 'ALL' },
           { label: 'Active', value: totalActive, color: '#22c55e', filterVal: 'ACTIVE' },
           { label: 'Idle', value: totalIdle, color: '#eab308', filterVal: 'IDLE' },
           { label: 'Offline', value: totalOffline, color: '#ef4444', filterVal: 'OFFLINE' },
           { label: 'Suspicious', value: totalSuspicious, color: '#f97316', filterVal: 'SUSPICIOUS' },
-          { label: 'Flagged', value: totalFlagged, color: '#dc2626', filterVal: 'FLAGGED' },
         ].map(card => (
           <div
             key={card.label}
@@ -288,7 +284,7 @@ export default function MonitoringPage() {
                       <StatusBadge status={emp.liveStatus} />
                     </td>
                     <td style={{ padding: '10px 12px' }}>
-                      <ScoreBadge score={emp.avgActivityScore ?? emp.liveActivityScore} flagged={emp.flagged} />
+                      <ScoreBadge score={emp.avgActivityScore ?? emp.liveActivityScore} suspicious={emp.suspiciousMinutes > 0} />
                     </td>
                     <td style={{ padding: '10px 12px', color: tdColor }}>
                       {formatTime(emp.checkIn)}
@@ -373,16 +369,16 @@ export default function MonitoringPage() {
                                   <div style={{ fontSize: 18, fontWeight: 700, color: '#ef4444' }}>{emp.suspiciousMinutes}m</div>
                                 </div>
                               )}
-                              {emp.flagged && (
+                              {emp.liveStatus === 'SUSPICIOUS' && (
                                 <div style={{
                                   padding: '8px 14px', borderRadius: 8, minWidth: 140,
-                                  backgroundColor: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.4)',
+                                  backgroundColor: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.4)',
                                   display: 'flex', alignItems: 'center', gap: 8,
                                 }}>
                                   <span style={{ fontSize: 20 }}>⚠</span>
                                   <div>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>FLAGGED</div>
-                                    <div style={{ fontSize: 10, color: '#ef4444' }}>Possible auto-clicker detected</div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#f97316' }}>SUSPICIOUS</div>
+                                    <div style={{ fontSize: 10, color: '#fb923c' }}>Auto-clicker or irregular activity detected</div>
                                   </div>
                                 </div>
                               )}

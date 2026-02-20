@@ -2,12 +2,11 @@
 AgentState — single source of truth for all agent state.
 
 All mutations happen on the Tkinter main thread. No locks needed.
-Eliminates the old scattered flags (_popup_open, _break_active, popup_showing)
-that caused double-show, stale-data, and race-condition bugs.
 """
 
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -18,8 +17,8 @@ class AgentState:
 
     # ── Popup lifecycle (prevents double-show) ────────────────
     popup_visible: bool = False
-    popup_allowed: bool = True       # False after popup shown, True after real activity
-    awaiting_first_activity: bool = False  # True after submit, until real input
+    popup_allowed: bool = True
+    awaiting_first_activity: bool = False
 
     # ── Break tracking ────────────────────────────────────────
     break_active: bool = False
@@ -34,14 +33,25 @@ class AgentState:
     system_locked: bool = False
     was_locked: bool = False
     lock_popup_handled: bool = False
+    lock_start_time: float = 0.0        # When lock began (filters brief UAC prompts)
+
+    # ── Connectivity ──────────────────────────────────────────
+    online: bool = True
+    offline_since: float = 0.0          # time.time() when we went offline
+    offline_break_started: bool = False  # True if we auto-opened a break for disconnect
+    consecutive_hb_failures: int = 0
+
+    # ── Shift info (fetched from server, None = always-on) ────
+    shift_start: Optional[str] = None   # "HH:MM" or None
+    shift_end: Optional[str] = None
+    shift_grace_min: int = 20
+    shift_crosses_midnight: bool = False
 
     @property
     def idle_seconds(self) -> float:
         """
-        Seconds since last real input, using monotonic clock.
-        Capped at 600s to absorb sleep/resume clock jumps —
-        prevents instant popup spam after a long suspend.
-        Any value >= 180 triggers idle; capping above that is safe.
+        Seconds since last real input (monotonic clock).
+        Capped at 600s to absorb sleep/resume clock jumps.
         """
         raw = time.monotonic() - self.last_monotonic_ts
         return min(raw, 600.0)
@@ -60,22 +70,32 @@ class AgentState:
         )
 
     def on_popup_shown(self):
-        """Called the instant the popup becomes visible."""
         self.popup_visible = True
-        self.popup_allowed = False      # One popup per idle episode
+        self.popup_allowed = False
         self.break_active = True
         self.break_start_time = time.time()
 
     def on_popup_submitted(self):
-        """Called when the user submits the break form."""
         self.popup_visible = False
-        self.awaiting_first_activity = True   # Require real input before next popup
-        self.record_activity()                # Reset idle timer (prevent instant re-trigger)
+        self.awaiting_first_activity = True
+        self.record_activity()
 
     def on_user_active(self):
-        """Called when real activity is detected after a popup episode."""
         self.awaiting_first_activity = False
-        self.popup_allowed = True             # Allow popup for next idle episode
+        self.popup_allowed = True
         self.was_locked = False
         self.lock_popup_handled = False
         self.break_active = False
+
+    # ── Connectivity transitions ──────────────────────────────
+
+    def mark_offline(self):
+        if not self.online:
+            return
+        self.online = False
+        self.offline_since = time.time()
+        self.offline_break_started = False
+
+    def mark_online(self):
+        self.online = True
+        self.consecutive_hb_failures = 0

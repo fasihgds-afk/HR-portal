@@ -22,29 +22,42 @@ class InputListeners:
         self._queue = input_queue
         self._mouse = None
         self._keyboard = None
-        self._last_move_time = 0.0
 
     def start(self):
         """Create and start mouse + keyboard listeners."""
         q = self._queue
 
-        # Throttle mouse moves in the callback itself to avoid flooding the queue
+        # Use closure-local mutable to avoid self-attribute access from pynput thread
+        last_move = [0.0]
+
         def on_move(x, y):
-            now = time.time()
-            if now - self._last_move_time < MOVE_THROTTLE_SEC:
-                return
-            self._last_move_time = now
-            q.put(("move", x, y, now))
+            try:
+                now = time.time()
+                if now - last_move[0] < MOVE_THROTTLE_SEC:
+                    return
+                last_move[0] = now
+                q.put(("move", x, y, now))
+            except Exception:
+                pass
 
         def on_click(x, y, button, pressed):
-            if pressed:
-                q.put(("click", x, y, time.time()))
+            try:
+                if pressed:
+                    q.put(("click", x, y, time.time()))
+            except Exception:
+                pass
 
         def on_scroll(x, y, dx, dy):
-            q.put(("scroll", time.time()))
+            try:
+                q.put(("scroll", time.time()))
+            except Exception:
+                pass
 
         def on_press(key):
-            q.put(("key", time.time()))
+            try:
+                q.put(("key", time.time()))
+            except Exception:
+                pass
 
         self._mouse = mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll)
         self._keyboard = keyboard.Listener(on_press=on_press)

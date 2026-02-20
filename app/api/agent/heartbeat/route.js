@@ -12,12 +12,14 @@ import { verifyToken } from '@/lib/security/tokens';
 import { resolveShiftWindow } from '@/lib/shift/resolveShiftWindow';
 
 const SUSPICIOUS_THRESHOLD = 30; // Score below this = suspicious
-const FLAG_AFTER_COUNT = 3;      // Flag device after N consecutive suspicious heartbeats
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { deviceId, deviceToken, empCode, state, activityScore } = body;
+    const {
+      deviceId, deviceToken, empCode, state,
+      activityScore, autoClickerDetected,
+    } = body;
 
     // ── Validate input ──────────────────────────────────────
     if (!deviceId || !deviceToken || !empCode) {
@@ -26,9 +28,9 @@ export async function POST(request) {
         { status: 400 }
       );
     }
-    if (!['ACTIVE', 'IDLE'].includes(state)) {
+    if (!['ACTIVE', 'IDLE', 'SUSPICIOUS'].includes(state)) {
       return NextResponse.json(
-        { error: 'state must be "ACTIVE" or "IDLE"' },
+        { error: 'state must be ACTIVE, IDLE, or SUSPICIOUS' },
         { status: 400 }
       );
     }
@@ -60,26 +62,22 @@ export async function POST(request) {
     const now = new Date();
     device.lastSeenAt = now;
 
-    // Determine effective state based on activity score
     let effectiveState = state;
     const score = typeof activityScore === 'number' ? Math.round(activityScore) : null;
 
     if (score !== null) {
       device.lastActivityScore = score;
+    }
 
-      if (state === 'ACTIVE' && score < SUSPICIOUS_THRESHOLD) {
-        // Low score while "ACTIVE" = suspicious
-        effectiveState = 'SUSPICIOUS';
-        device.suspiciousCount = (device.suspiciousCount || 0) + 1;
-
-        // Auto-flag after consecutive suspicious heartbeats
-        if (device.suspiciousCount >= FLAG_AFTER_COUNT) {
-          device.flagged = true;
-        }
-      } else {
-        // Good score — reset consecutive counter
-        device.suspiciousCount = 0;
-      }
+    // Agent sends SUSPICIOUS when auto-clicker detected or score < 30
+    if (state === 'SUSPICIOUS' || autoClickerDetected) {
+      effectiveState = 'SUSPICIOUS';
+      device.suspiciousCount = (device.suspiciousCount || 0) + 1;
+    } else if (state === 'ACTIVE' && score !== null && score < SUSPICIOUS_THRESHOLD) {
+      effectiveState = 'SUSPICIOUS';
+      device.suspiciousCount = (device.suspiciousCount || 0) + 1;
+    } else if (state === 'ACTIVE') {
+      device.suspiciousCount = 0;
     }
 
     device.lastState = effectiveState;

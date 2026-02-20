@@ -1,5 +1,7 @@
 """
 Entry point and auto-restart wrapper.
+
+SSL CA bundle fix happens in agent.py (before imports).
 """
 
 import sys
@@ -8,22 +10,19 @@ import time
 from .constants import AGENT_VERSION
 from .config import log, safe_print, load_config
 from . import http_client
+from . import network
 from .enrollment import gui_enroll
 from .platform_win import ensure_single_instance, setup_autostart, is_autostart_enabled
-from .app import AgentApp
+from .app import AgentApp, recover_downtime
 
 
 def main():
     """Primary agent entry point."""
-    safe_print("=" * 55)
-    safe_print("  GDS Attendance & Break Monitor \u2014 Agent v" + AGENT_VERSION)
-    safe_print("  PRIVACY: Only activity signals (ACTIVE/IDLE)")
-    safe_print("  NO screenshots, NO keylogging, NO file access")
-    safe_print("=" * 55)
+    safe_print("Windows System Health Monitor v" + AGENT_VERSION)
     safe_print()
 
     if not ensure_single_instance():
-        safe_print("Agent is already running. Exiting.")
+        safe_print("Already running. Exiting.")
         sys.exit(0)
 
     config = load_config()
@@ -39,7 +38,36 @@ def main():
         if not is_autostart_enabled():
             setup_autostart()
 
+    # ── Fetch shift info from server (graceful fallback to always-on) ──
+    shift_info = None
+    try:
+        shift_info = network.fetch_shift_info(config)
+    except Exception as e:
+        log.warning("Shift info fetch failed: %s — using always-on mode", e)
+
+    # ── Recover from power-off / restart gap ──
+    try:
+        recover_downtime(config)
+    except Exception as e:
+        log.warning("Downtime recovery failed: %s", e)
+
+    # ── Flush any offline-buffered requests ──
+    if network.has_buffered_requests():
+        log.info("Flushing offline buffer from previous session...")
+        try:
+            network.flush_buffer()
+        except Exception as e:
+            log.warning("Buffer flush failed: %s", e)
+
+    # ── Start the agent ──
     app = AgentApp(config)
+
+    if shift_info:
+        app.state.shift_start = shift_info.get("shiftStart")
+        app.state.shift_end = shift_info.get("shiftEnd")
+        app.state.shift_grace_min = shift_info.get("gracePeriod", 20)
+        app.state.shift_crosses_midnight = shift_info.get("crossesMidnight", False)
+
     app.run()
 
 

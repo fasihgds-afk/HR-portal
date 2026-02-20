@@ -118,7 +118,7 @@ export async function GET(request) {
     const shiftMap = new Map(shifts.map(s => [s.code, s]));
 
     const devices = await Device.find({ empCode: { $in: empCodes }, isRevoked: false })
-      .select('empCode lastSeenAt lastState lastActivityScore suspiciousCount flagged')
+      .select('empCode lastSeenAt lastState lastActivityScore suspiciousCount')
       .lean();
     const deviceMap = new Map();
     for (const d of devices) {
@@ -221,7 +221,6 @@ export async function GET(request) {
       const avgScore = att.avgActivityScore ?? null;
       const suspiciousMin = att.suspiciousMinutes || 0;
       const liveScore = device?.lastActivityScore ?? null;
-      const isFlagged = device?.flagged || false;
 
       return {
         empCode: att.empCode,
@@ -242,11 +241,9 @@ export async function GET(request) {
         deductedBreakHrs,
         productiveHrs,
         productivityPct,
-        // Anti-auto-clicker data
         avgActivityScore: avgScore,
         liveActivityScore: liveScore,
         suspiciousMinutes: suspiciousMin,
-        flagged: isFlagged,
         breakCount: empBreaks.length,
         // Category breakdown (minutes)
         breakDown: {

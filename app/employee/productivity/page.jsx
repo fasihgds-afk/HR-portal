@@ -232,7 +232,11 @@ export default function EmployeeProductivityPage() {
               </div>
               <div>
                 <span style={{ color: textMuted }}>Status: </span>
-                <strong style={{ color: textPrimary }}>{data.attendanceStatus || '-'}</strong>
+                <strong style={{
+                  color: data.liveStatus === 'ACTIVE' ? '#22c55e' :
+                    data.liveStatus === 'SUSPICIOUS' ? '#f97316' :
+                    data.liveStatus === 'IDLE' ? '#eab308' : textPrimary,
+                }}>{data.liveStatus || data.attendanceStatus || '-'}</strong>
               </div>
               <div>
                 <span style={{ color: textMuted }}>Breaks: </span>
@@ -272,6 +276,37 @@ export default function EmployeeProductivityPage() {
                   </div>
                   <div style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>
                     This score reflects the natural variety in your mouse and keyboard usage patterns.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Suspicious Activity (only show if any) */}
+          {data.suspiciousMinutes > 0 && (
+            <div style={{
+              padding: 18, borderRadius: 12, marginBottom: 20,
+              backgroundColor: 'rgba(249,115,22,0.05)',
+              border: '1px solid rgba(249,115,22,0.3)',
+            }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: '#f97316' }}>
+                Suspicious Activity Detected
+              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: '50%', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700,
+                  backgroundColor: 'rgba(249,115,22,0.15)', color: '#f97316',
+                  border: '2px solid #f97316',
+                }}>
+                  {data.suspiciousMinutes}m
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f97316' }}>
+                    {data.suspiciousMinutes} minutes of suspicious activity today
+                  </div>
+                  <div style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>
+                    Automated clicking software or irregular mouse/keyboard patterns were detected during this time.
                   </div>
                 </div>
               </div>
