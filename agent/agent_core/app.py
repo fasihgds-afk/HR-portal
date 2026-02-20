@@ -491,11 +491,12 @@ class AgentApp:
 
 # ─── Downtime recovery (called once at startup, before mainloop) ──
 
-def recover_downtime(config):
+def recover_downtime(config, shift_info=None):
     """
     Check for a power-off/restart gap since last run.
-    If the gap is > DOWNTIME_MIN_GAP_SEC during a shift, create a
-    completed break record covering the downtime.
+    If the gap is > DOWNTIME_MIN_GAP_SEC, create a completed break record
+    covering only the portion of downtime that falls inside the shift+grace
+    window.  Time outside the shift is silently ignored.
     """
     emp_code = config["empCode"]
     last_alive = network.get_last_alive_ts(emp_code)
@@ -515,8 +516,79 @@ def recover_downtime(config):
         gap, gap / 60,
     )
 
+    # Clip recovery to shift+grace window if shift info is available.
+    # This prevents recording 17+ hour "breaks" that span past shift end.
+    effective_start = last_alive
+    if shift_info:
+        try:
+            grace_sec = shift_info.get("gracePeriod", 20) * 60
+            shift_end_str = shift_info.get("shiftEnd")      # "HH:MM"
+            shift_start_str = shift_info.get("shiftStart")   # "HH:MM"
+            crosses = shift_info.get("crossesMidnight", False)
+
+            if shift_end_str and shift_start_str:
+                from datetime import date as _date_cls
+
+                alive_dt = datetime.fromtimestamp(last_alive, tz=_PKT)
+                alive_date = alive_dt.date()
+
+                sh, sm = map(int, shift_start_str.split(":"))
+                eh, em = map(int, shift_end_str.split(":"))
+
+                shift_start_dt = datetime(
+                    alive_date.year, alive_date.month, alive_date.day,
+                    sh, sm, tzinfo=_PKT,
+                )
+
+                if crosses:
+                    next_day = alive_date + timedelta(days=1)
+                    shift_end_dt = datetime(
+                        next_day.year, next_day.month, next_day.day,
+                        eh, em, tzinfo=_PKT,
+                    )
+                    # If last_alive is before midnight, shift_start is same day.
+                    # If after midnight, shift started the previous day.
+                    if alive_dt.hour < 12:
+                        prev_day = alive_date - timedelta(days=1)
+                        shift_start_dt = datetime(
+                            prev_day.year, prev_day.month, prev_day.day,
+                            sh, sm, tzinfo=_PKT,
+                        )
+                        shift_end_dt = datetime(
+                            alive_date.year, alive_date.month, alive_date.day,
+                            eh, em, tzinfo=_PKT,
+                        )
+                else:
+                    shift_end_dt = datetime(
+                        alive_date.year, alive_date.month, alive_date.day,
+                        eh, em, tzinfo=_PKT,
+                    )
+
+                grace_end_ts = shift_end_dt.timestamp() + grace_sec
+                grace_start_ts = shift_start_dt.timestamp() - grace_sec
+
+                # Skip entirely if last_alive was already past grace end
+                if last_alive >= grace_end_ts:
+                    log.info(
+                        "Power-off at %.0f was after shift grace end (%.0f) — no recovery break needed",
+                        last_alive, grace_end_ts,
+                    )
+                    network.save_alive_ts(emp_code)
+                    return
+
+                if effective_start < grace_start_ts:
+                    effective_start = grace_start_ts
+
+                clipped_gap = grace_end_ts - effective_start
+                log.info(
+                    "Recovery clipped to shift window: %.1f min (was %.1f min raw)",
+                    clipped_gap / 60, gap / 60,
+                )
+        except Exception as e:
+            log.warning("Shift-clip calculation failed (using raw gap): %s", e)
+
     try:
-        ok = send_break_start(config, last_alive)
+        ok = send_break_start(config, effective_start)
         if ok:
             send_break_reason(config, "Others", "System Power Off / Restart (auto-detected)")
             send_break_end(config)

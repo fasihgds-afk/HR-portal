@@ -12,8 +12,9 @@ import { connectDB } from '@/lib/db';
 import Device from '@/models/Device';
 import BreakLog from '@/models/BreakLog';
 import Employee from '@/models/Employee';
+import Shift from '@/models/Shift';
 import { verifyToken } from '@/lib/security/tokens';
-import { resolveShiftWindow } from '@/lib/shift/resolveShiftWindow';
+import { resolveShiftWindow, computeShiftWindowForDate } from '@/lib/shift/resolveShiftWindow';
 
 // ── Helper: Authenticate device ──────────────────────────────────
 async function authDevice(deviceId, deviceToken, empCode) {
@@ -47,9 +48,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Device not found or invalid token' }, { status: 401 });
     }
 
-    // Get employee info
+    // Get employee info (includes shift fields for window clipping)
     const emp = await Employee.findOne({ empCode: empCode.trim() })
-      .select('name department')
+      .select('name department shift shiftId')
       .lean();
 
     // Resolve shift for attendanceDate
@@ -65,10 +66,24 @@ export async function POST(request) {
     }
 
     // Close ALL existing open breaks (safety net — prevents duplicates & orphans)
+    // Clip to shift window so orphans don't accumulate hours outside the shift.
+    let clipShift = null;
+    try {
+      if (emp?.shiftId) clipShift = await Shift.findById(emp.shiftId).lean();
+      if (!clipShift && emp?.shift) clipShift = await Shift.findOne({ code: emp.shift.toUpperCase().trim() }).lean();
+    } catch { /* non-fatal */ }
+
     const openBreaks = await BreakLog.find({ empCode: empCode.trim(), endedAt: null });
     const closeTime = new Date();
     for (const ob of openBreaks) {
       ob.endedAt = closeTime;
+      if (clipShift && ob.date) {
+        try {
+          const win = computeShiftWindowForDate(clipShift, ob.date);
+          if (ob.endedAt > win.graceEnd) ob.endedAt = win.graceEnd;
+          if (ob.startedAt < win.graceStart) ob.startedAt = win.graceStart;
+        } catch { /* non-fatal */ }
+      }
       ob.durationMin = Math.max(0, Math.round((ob.endedAt - ob.startedAt) / 60000));
       await ob.save();
     }
@@ -155,6 +170,26 @@ export async function PATCH(request) {
     // ── Step 3: End break (employee became ACTIVE) ────────────
     // Also handles legacy agents that don't send "action"
     openBreak.endedAt = new Date();
+
+    // Clip break to the shift+grace window so downtime outside the
+    // shift is never counted (e.g. power-off recovery spanning hours
+    // past shift end).
+    try {
+      const emp = await Employee.findOne({ empCode: empCode.trim() })
+        .select('shift shiftId').lean();
+      let shift = null;
+      if (emp?.shiftId) shift = await Shift.findById(emp.shiftId).lean();
+      if (!shift && emp?.shift) shift = await Shift.findOne({ code: emp.shift.toUpperCase().trim() }).lean();
+
+      if (shift && openBreak.date) {
+        const win = computeShiftWindowForDate(shift, openBreak.date);
+        if (openBreak.endedAt > win.graceEnd) openBreak.endedAt = win.graceEnd;
+        if (openBreak.startedAt < win.graceStart) openBreak.startedAt = win.graceStart;
+      }
+    } catch (clipErr) {
+      console.error('Shift clip warning (non-fatal):', clipErr.message);
+    }
+
     openBreak.durationMin = Math.max(0, Math.round(
       (openBreak.endedAt - openBreak.startedAt) / 60000
     ));

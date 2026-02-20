@@ -47,7 +47,7 @@ def main():
 
     # ── Recover from power-off / restart gap ──
     try:
-        recover_downtime(config)
+        recover_downtime(config, shift_info=shift_info)
     except Exception as e:
         log.warning("Downtime recovery failed: %s", e)
 

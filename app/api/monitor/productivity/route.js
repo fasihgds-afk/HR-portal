@@ -18,7 +18,7 @@ import ShiftAttendance from '@/models/ShiftAttendance';
 import BreakLog from '@/models/BreakLog';
 import Shift from '@/models/Shift';
 import Device from '@/models/Device';
-import { resolveShiftWindow } from '@/lib/shift/resolveShiftWindow';
+import { resolveShiftWindow, computeShiftWindowForDate } from '@/lib/shift/resolveShiftWindow';
 
 const TZ = 'Asia/Karachi';
 const OFFLINE_THRESHOLD_SEC = 180;
@@ -31,9 +31,23 @@ const BREAK_ALLOWANCE = {
   'Others':         0,        // No allowance — fully deducted
 };
 
-function getBreakDuration(b, now) {
-  if (b.endedAt) return Math.max(0, b.durationMin || 0);
-  return Math.max(0, Math.round((now - new Date(b.startedAt).getTime()) / 60000));
+function getBreakDuration(b, now, shift) {
+  let start = new Date(b.startedAt).getTime();
+  let end = b.endedAt ? new Date(b.endedAt).getTime() : now;
+
+  // Clip to shift+grace window so breaks that span outside the shift
+  // (e.g. power-off recovery) don't inflate totals.
+  if (shift && b.date) {
+    try {
+      const win = computeShiftWindowForDate(shift, b.date);
+      const gs = win.graceStart.getTime();
+      const ge = win.graceEnd.getTime();
+      if (start < gs) start = gs;
+      if (end > ge) end = ge;
+    } catch { /* fallback: use raw values */ }
+  }
+
+  return Math.max(0, Math.round((end - start) / 60000));
 }
 
 function addDays(dateStr, days) {
@@ -162,7 +176,7 @@ export async function GET(request) {
       let totalBreakMin = 0;
 
       for (const b of empBreaks) {
-        const dur = getBreakDuration(b, now);
+        const dur = getBreakDuration(b, now, shift);
         totalBreakMin += dur;
 
         switch (b.reason) {
