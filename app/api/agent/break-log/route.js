@@ -6,6 +6,7 @@
 //   Step 3 — PATCH: Employee becomes ACTIVE → close break (endedAt = now) (action: "end-break")
 //
 // This captures the FULL idle time: from form appearing to actual work resuming.
+// Final persisted categories are strictly: Official, General, Namaz.
 
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
@@ -15,6 +16,22 @@ import Employee from '@/models/Employee';
 import Shift from '@/models/Shift';
 import { verifyToken } from '@/lib/security/tokens';
 import { resolveShiftWindow, computeShiftWindowForDate } from '@/lib/shift/resolveShiftWindow';
+
+const CATEGORY_LIMIT_MIN = {
+  Official: Infinity,
+  General: 60,
+  Namaz: 25,
+};
+
+function normalizeCategory(input) {
+  const value = String(input || '').trim();
+  if (value === 'Official') return 'Official';
+  if (value === 'Namaz') return 'Namaz';
+  if (value === 'General') return 'General';
+  // Backward compatibility for older agents / data
+  if (value === 'Personal Break' || value === 'Others' || value === 'Other') return 'General';
+  return null;
+}
 
 // ── Helper: Authenticate device ──────────────────────────────────
 async function authDevice(deviceId, deviceToken, empCode) {
@@ -144,31 +161,52 @@ export async function PATCH(request) {
     const openBreak = await BreakLog.findOne({ empCode: empCode.trim(), endedAt: null });
 
     if (!openBreak) {
-      return NextResponse.json({ ok: true, message: 'No open break found' });
+      return NextResponse.json(
+        { error: 'No open break found for this employee' },
+        { status: 409 }
+      );
     }
 
     // ── Step 2: Update reason (form was submitted) ────────────
     if (action === 'update-reason') {
-      if (!reason || !customReason) {
+      const trimmedCustom = String(customReason || '').trim();
+      if (!reason || !trimmedCustom) {
         return NextResponse.json(
           { error: 'reason and customReason are required for update-reason' },
           { status: 400 }
         );
       }
 
-      openBreak.reason = reason;
-      openBreak.customReason = customReason;
+      const normalized = normalizeCategory(reason);
+      if (!normalized) {
+        return NextResponse.json(
+          { error: 'reason must be one of: Official, General, Namaz' },
+          { status: 400 }
+        );
+      }
+
+      openBreak.reason = normalized;
+      openBreak.customReason = trimmedCustom;
       await openBreak.save();
 
       return NextResponse.json({
         ok: true,
-        message: `Break reason updated: ${reason}`,
+        message: `Break reason updated: ${normalized}`,
         breakLogId: openBreak._id,
       });
     }
 
     // ── Step 3: End break (employee became ACTIVE) ────────────
     // Also handles legacy agents that don't send "action"
+    const normalizedReason = normalizeCategory(openBreak.reason);
+    if (!normalizedReason || normalizedReason === 'Pending' || !String(openBreak.customReason || '').trim() || String(openBreak.customReason || '').trim() === 'Pending') {
+      return NextResponse.json(
+        { error: 'Cannot end break before a valid category and reason are submitted' },
+        { status: 400 }
+      );
+    }
+
+    openBreak.reason = normalizedReason;
     openBreak.endedAt = new Date();
 
     // Clip break to the shift+grace window so downtime outside the
@@ -193,6 +231,9 @@ export async function PATCH(request) {
     openBreak.durationMin = Math.max(0, Math.round(
       (openBreak.endedAt - openBreak.startedAt) / 60000
     ));
+    const allowed = CATEGORY_LIMIT_MIN[normalizedReason];
+    openBreak.allowedDurationMin = Number.isFinite(allowed) ? allowed : openBreak.durationMin;
+    openBreak.exceededDurationMin = Math.max(0, openBreak.durationMin - openBreak.allowedDurationMin);
     await openBreak.save();
 
     return NextResponse.json({

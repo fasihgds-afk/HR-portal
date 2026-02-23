@@ -3,8 +3,8 @@
 //
 // HYBRID FLOW:
 //   1. Form appears  → record created with reason="Pending", endedAt=null
-//   2. Form submitted → reason updated to actual category + text
-//   3. Employee works → endedAt set, durationMin calculated
+//   2. Form submitted → reason updated to category + mandatory text
+//   3. Employee works → endedAt set, duration/allowed/exceeded are calculated
 //
 // Each record = one idle period from form appearance to work resumption.
 
@@ -33,7 +33,7 @@ const BreakLogSchema = new mongoose.Schema(
     reason: {
       type: String,
       required: true,
-      // "Pending" initially, then: Official, Personal Break, Namaz, Others
+      // "Pending" initially, then one of: Official, General, Namaz
     },
     customReason: {
       type: String,
@@ -49,6 +49,14 @@ const BreakLogSchema = new mongoose.Schema(
     },
     durationMin: {
       type: Number, // auto-calculated when break ends
+      default: 0,
+    },
+    allowedDurationMin: {
+      type: Number, // category-based allowance (Official=unlimited)
+      default: 0,
+    },
+    exceededDurationMin: {
+      type: Number, // max(0, durationMin - allowedDurationMin)
       default: 0,
     },
     deviceId: {

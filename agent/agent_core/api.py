@@ -90,6 +90,12 @@ def send_break_start(config, break_start_time):
 
 def send_break_reason(config, reason, custom_reason):
     """Step 2: Update the open break with employee's chosen reason."""
+    reason = (reason or "").strip()
+    custom_reason = (custom_reason or "").strip()
+    if not reason or not custom_reason:
+        log.warning("Break reason update skipped: reason/custom reason is required")
+        return False
+
     url = f"{config['serverUrl']}/api/agent/break-log"
     payload = {
         "deviceId": config["deviceId"],
@@ -112,9 +118,11 @@ def send_break_reason(config, reason, custom_reason):
         if attempt < 2:
             time.sleep(2 * (attempt + 1))
 
-    log.error("Break reason update FAILED after 3 attempts — buffering")
+    log.error("Break reason update FAILED after 3 attempts — buffering (will sync when online)")
     network.buffer_request("PATCH", url, payload)
-    return False
+    # Returning True keeps the popup flow non-blocking while preserving data in
+    # the offline buffer. The request will be replayed by flush_buffer().
+    return True
 
 
 def send_break_end(config):

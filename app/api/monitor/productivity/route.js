@@ -2,10 +2,9 @@
 // HR Admin + Employee: View productivity (hours worked, break time, etc.)
 //
 // Break Allowance Rules (per shift):
-//   Official    → counts as PRODUCTIVE (0 deduction)
-//   Personal    → 60 min allowed, excess is deducted
-//   Namaz       → 20 min allowed, excess is deducted
-//   Others      → fully deducted (no allowance)
+//   Official    → counts as PRODUCTIVE (no fixed limit)
+//   General     → 60 min allowed, excess is deducted
+//   Namaz       → 25 min allowed, excess is deducted
 //
 // GET ?date=2026-02-10                     → all employees for that date
 // GET ?empCode=00002                       → auto-detect correct shift date
@@ -25,11 +24,19 @@ const OFFLINE_THRESHOLD_SEC = 180;
 
 // Break allowance limits (minutes per day)
 const BREAK_ALLOWANCE = {
-  'Official':       Infinity, // Fully productive — no deduction
-  'Personal Break': 60,       // 1 hour allowed
-  'Namaz':          20,       // 20 minutes allowed
-  'Others':         0,        // No allowance — fully deducted
+  Official: Infinity,
+  General: 60,
+  Namaz: 25,
 };
+
+function normalizeBreakCategory(reason) {
+  if (reason === 'Official') return 'Official';
+  if (reason === 'Namaz') return 'Namaz';
+  if (reason === 'General') return 'General';
+  // Backward compatibility for historical data
+  if (reason === 'Personal Break' || reason === 'Others' || reason === 'Other') return 'General';
+  return 'General';
+}
 
 function getBreakDuration(b, now, shift) {
   let start = new Date(b.startedAt).getTime();
@@ -170,46 +177,47 @@ export async function GET(request) {
 
       // ── Break analysis by category ─────────────────────
       let officialMin = 0;
-      let personalMin = 0;
+      let generalMin = 0;
       let namazMin = 0;
-      let othersMin = 0;
       let totalBreakMin = 0;
 
       for (const b of empBreaks) {
         const dur = getBreakDuration(b, now, shift);
         totalBreakMin += dur;
+        const category = normalizeBreakCategory(b.reason);
 
-        switch (b.reason) {
-          case 'Official':       officialMin += dur; break;
-          case 'Personal Break': personalMin += dur; break;
-          case 'Namaz':          namazMin += dur; break;
-          default:               othersMin += dur; break;
+        switch (category) {
+          case 'Official': officialMin += dur; break;
+          case 'Namaz': namazMin += dur; break;
+          default: generalMin += dur; break;
         }
       }
 
+      // Activity score from attendance record (daily avg) and live from device
+      const avgScore = att.avgActivityScore ?? null;
+      const suspiciousMin = att.suspiciousMinutes || 0;
+      const liveScore = device?.lastActivityScore ?? null;
+
       // ── Calculate deductions using allowance rules ─────
       // Official: 0 deduction (counts as productive)
-      const officialDeducted = 0;
 
-      // Personal: first 60 min free, excess deducted
-      const personalAllowed = Math.min(personalMin, BREAK_ALLOWANCE['Personal Break']);
-      const personalExcess = Math.max(0, personalMin - BREAK_ALLOWANCE['Personal Break']);
+      // General: first 60 min free, excess deducted
+      const generalAllowed = Math.min(generalMin, BREAK_ALLOWANCE.General);
+      const generalExcess = Math.max(0, generalMin - BREAK_ALLOWANCE.General);
 
-      // Namaz: first 40 min free, excess deducted
-      const namazAllowed = Math.min(namazMin, BREAK_ALLOWANCE['Namaz']);
-      const namazExcess = Math.max(0, namazMin - BREAK_ALLOWANCE['Namaz']);
+      // Namaz: first 25 min free, excess deducted
+      const namazAllowed = Math.min(namazMin, BREAK_ALLOWANCE.Namaz);
+      const namazExcess = Math.max(0, namazMin - BREAK_ALLOWANCE.Namaz);
 
-      // Others: fully deducted
-      const othersDeducted = othersMin;
-
-      // Total deducted = only the excess + others
-      const totalDeductedMin = personalExcess + namazExcess + othersDeducted;
+      // Total deducted = only excess over category limits
+      const totalDeductedMin = generalExcess + namazExcess;
 
       // Allowed (non-deducted) break time
-      const allowedBreakMin = officialMin + personalAllowed + namazAllowed;
+      const allowedBreakMin = officialMin + generalAllowed + namazAllowed;
 
       // Productive = worked - deductions
       const productiveMin = Math.max(0, totalWorkedMin - totalDeductedMin);
+      const netProductiveMin = Math.max(0, productiveMin - suspiciousMin);
 
       // Consistent rounding for display
       const shiftDurationHrs = +(shiftDurationMin / 60).toFixed(1);
@@ -218,10 +226,12 @@ export async function GET(request) {
       const allowedBreakHrs = +(allowedBreakMin / 60).toFixed(1);
       const deductedBreakHrs = +(totalDeductedMin / 60).toFixed(1);
       const productiveHrs = +(productiveMin / 60).toFixed(1);
+      const suspiciousHrs = +(suspiciousMin / 60).toFixed(1);
+      const netProductiveHrs = +(netProductiveMin / 60).toFixed(1);
 
       // Productivity % (productive / shift)
       const productivityPct = shiftDurationMin > 0
-        ? Math.min(100, Math.round((productiveMin / shiftDurationMin) * 100))
+        ? Math.min(100, Math.round((netProductiveMin / shiftDurationMin) * 100))
         : 0;
 
       // Live status
@@ -230,11 +240,6 @@ export async function GET(request) {
         const secsSince = (now - new Date(device.lastSeenAt).getTime()) / 1000;
         liveStatus = secsSince > OFFLINE_THRESHOLD_SEC ? 'OFFLINE' : (device.lastState || 'IDLE');
       }
-
-      // Activity score from attendance record (daily avg) and live from device
-      const avgScore = att.avgActivityScore ?? null;
-      const suspiciousMin = att.suspiciousMinutes || 0;
-      const liveScore = device?.lastActivityScore ?? null;
 
       return {
         empCode: att.empCode,
@@ -254,6 +259,8 @@ export async function GET(request) {
         allowedBreakHrs,
         deductedBreakHrs,
         productiveHrs,
+        suspiciousHrs,
+        netProductiveHrs,
         productivityPct,
         avgActivityScore: avgScore,
         liveActivityScore: liveScore,
@@ -262,16 +269,25 @@ export async function GET(request) {
         // Category breakdown (minutes)
         breakDown: {
           official:   { totalMin: officialMin, allowedMin: officialMin, excessMin: 0 },
-          personal:   { totalMin: personalMin, allowedMin: personalAllowed, excessMin: personalExcess },
+          general:    { totalMin: generalMin, allowedMin: generalAllowed, excessMin: generalExcess },
           namaz:      { totalMin: namazMin,    allowedMin: namazAllowed,    excessMin: namazExcess },
-          others:     { totalMin: othersMin,   allowedMin: 0,              excessMin: othersMin },
         },
         breaks: empBreaks.map(b => ({
-          reason: b.reason,
+          reason: normalizeBreakCategory(b.reason),
           customReason: b.customReason,
           startedAt: b.startedAt,
           endedAt: b.endedAt,
-          durationMin: b.durationMin || 0,
+          durationMin: getBreakDuration(b, now, shift),
+          allowedDurationMin: Number.isFinite(BREAK_ALLOWANCE[normalizeBreakCategory(b.reason)])
+            ? BREAK_ALLOWANCE[normalizeBreakCategory(b.reason)]
+            : getBreakDuration(b, now, shift),
+          exceededDurationMin: Math.max(
+            0,
+            getBreakDuration(b, now, shift) -
+              (Number.isFinite(BREAK_ALLOWANCE[normalizeBreakCategory(b.reason)])
+                ? BREAK_ALLOWANCE[normalizeBreakCategory(b.reason)]
+                : getBreakDuration(b, now, shift))
+          ),
           isOpen: !b.endedAt,
         })),
       };

@@ -217,9 +217,8 @@ export default function MonitoringPage() {
       }}>
         {[
           { label: 'Official', desc: 'Counts as productive', color: '#3b82f6' },
-          { label: 'Personal', desc: '60 min/shift allowed', color: '#f59e0b' },
-          { label: 'Namaz', desc: '20 min/shift allowed', color: '#8b5cf6' },
-          { label: 'Others', desc: 'Fully deducted', color: '#ef4444' },
+          { label: 'General', desc: '60 min/shift allowed', color: '#f59e0b' },
+          { label: 'Namaz', desc: '25 min/shift allowed', color: '#8b5cf6' },
         ].map(p => (
           <div key={p.label} style={{
             display: 'flex', alignItems: 'center', gap: 6,
@@ -321,8 +320,8 @@ export default function MonitoringPage() {
                         <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderTable}` }}>
                           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 10 }}>
                             {emp.breakDown && Object.entries(emp.breakDown).map(([key, val]) => {
-                              const labelMap = { official: 'Official', personal: 'Personal', namaz: 'Namaz', others: 'Others' };
-                              const colorMap = { official: '#3b82f6', personal: '#f59e0b', namaz: '#8b5cf6', others: '#ef4444' };
+                              const labelMap = { official: 'Official', general: 'General', namaz: 'Namaz' };
+                              const colorMap = { official: '#3b82f6', general: '#f59e0b', namaz: '#8b5cf6' };
                               return (
                                 <div key={key} style={{
                                   padding: '8px 14px', borderRadius: 8, minWidth: 140,
@@ -369,6 +368,20 @@ export default function MonitoringPage() {
                                   <div style={{ fontSize: 18, fontWeight: 700, color: '#ef4444' }}>{emp.suspiciousMinutes}m</div>
                                 </div>
                               )}
+                              <div style={{
+                                padding: '8px 14px', borderRadius: 8, minWidth: 140,
+                                backgroundColor: bgSecondary, border: `1px solid ${borderColor}`,
+                              }}>
+                                <div style={{ fontSize: 11, color: textMuted, marginBottom: 2 }}>Total Productivity</div>
+                                <div style={{ fontSize: 18, fontWeight: 700, color: '#22c55e' }}>{emp.productiveHrs}h</div>
+                              </div>
+                              <div style={{
+                                padding: '8px 14px', borderRadius: 8, minWidth: 140,
+                                backgroundColor: bgSecondary, border: `1px solid ${borderColor}`,
+                              }}>
+                                <div style={{ fontSize: 11, color: textMuted, marginBottom: 2 }}>Net Productivity</div>
+                                <div style={{ fontSize: 18, fontWeight: 700, color: '#38bdf8' }}>{emp.netProductiveHrs ?? emp.productiveHrs}h</div>
+                              </div>
                               {emp.liveStatus === 'SUSPICIOUS' && (
                                 <div style={{
                                   padding: '8px 14px', borderRadius: 8, minWidth: 140,
@@ -393,7 +406,7 @@ export default function MonitoringPage() {
                               }}>
                                 <span style={{
                                   width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                                  backgroundColor: { Official: '#3b82f6', 'Personal Break': '#f59e0b', Namaz: '#8b5cf6' }[b.reason] || '#ef4444',
+                                  backgroundColor: { Official: '#3b82f6', General: '#f59e0b', Namaz: '#8b5cf6' }[b.reason] || '#ef4444',
                                 }} />
                                 <span style={{ color: textSecondary, fontWeight: 500, minWidth: 100 }}>{b.reason}</span>
                                 <span style={{ color: textMuted, flex: 1 }}>{b.customReason || ''}</span>
@@ -401,6 +414,11 @@ export default function MonitoringPage() {
                                 <span style={{ fontWeight: 600, color: b.isOpen ? '#f59e0b' : textSecondary, minWidth: 50, textAlign: 'right' }}>
                                   {b.isOpen ? 'Active' : `${b.durationMin}m`}
                                 </span>
+                                {!b.isOpen && (
+                                  <span style={{ fontSize: 11, color: b.exceededDurationMin > 0 ? '#ef4444' : textMuted, minWidth: 110, textAlign: 'right' }}>
+                                    Allow: {b.allowedDurationMin}m | Excess: {b.exceededDurationMin}m
+                                  </span>
+                                )}
                               </div>
                             ))}
                           </div>

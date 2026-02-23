@@ -42,6 +42,20 @@ def buffer_request(method, url, payload):
     """Save a failed API call to disk for later replay."""
     entry = {"method": method, "url": url, "payload": payload, "ts": time.time()}
     try:
+        # Avoid back-to-back duplicate entries for the same request payload.
+        if OFFLINE_BUFFER_FILE.exists():
+            try:
+                lines = OFFLINE_BUFFER_FILE.read_text(encoding="utf-8").strip().split("\n")
+                if lines and lines[-1].strip():
+                    last = json.loads(lines[-1])
+                    if (
+                        last.get("method") == method
+                        and last.get("url") == url
+                        and last.get("payload") == payload
+                    ):
+                        return
+            except Exception:
+                pass
         with open(OFFLINE_BUFFER_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         log.info("Buffered offline request: %s %s", method, url.split("/")[-1])

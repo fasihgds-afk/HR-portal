@@ -55,9 +55,8 @@ AUTOCLICKER_PROCESSES = frozenset({
 # ─── Break Categories ────────────────────────────────────────────
 BREAK_REASONS = [
     "Official",
-    "Personal Break",
+    "General",
     "Namaz",
-    "Others",
 ]
 
 # ─── Portal Theme Colors (matching HR portal dark theme) ─────────

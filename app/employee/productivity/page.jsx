@@ -69,9 +69,8 @@ export default function EmployeeProductivityPage() {
 
   const breakColors = {
     'Official': '#3b82f6',
-    'Personal Break': '#f59e0b',
+    'General': '#f59e0b',
     'Namaz': '#8b5cf6',
-    'Others': '#ef4444',
   };
 
   return (
@@ -138,7 +137,7 @@ export default function EmployeeProductivityPage() {
             {[
               { label: 'Shift Duration', value: data.shiftDurationHrs, unit: 'hrs', color: '#60a5fa' },
               { label: 'Total Worked', value: data.totalWorkedHrs, unit: 'hrs', color: textPrimary },
-              { label: 'Productive', value: data.productiveHrs, unit: 'hrs', color: '#22c55e' },
+              { label: 'Total Productive', value: data.productiveHrs, unit: 'hrs', color: '#22c55e' },
             ].map(s => (
               <div key={s.label} style={{
                 padding: '16px 14px', borderRadius: 10, backgroundColor: bgCard,
@@ -177,6 +176,18 @@ export default function EmployeeProductivityPage() {
                 </div>
               </div>
               <div style={{ padding: '10px 12px', borderRadius: 8, backgroundColor: bgSecondary, border: `1px solid ${borderColor}` }}>
+                <div style={{ fontSize: 11, color: textMuted }}>Suspicious Time</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: data.suspiciousHrs > 0 ? '#f97316' : textSecondary }}>
+                  {data.suspiciousHrs ?? +(data.suspiciousMinutes / 60).toFixed(1)}<span style={{ fontSize: 12, color: textMuted }}> hrs</span>
+                </div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 8, backgroundColor: bgSecondary, border: `1px solid ${borderColor}` }}>
+                <div style={{ fontSize: 11, color: textMuted }}>Net Productive (after suspicious)</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#38bdf8' }}>
+                  {data.netProductiveHrs ?? data.productiveHrs}<span style={{ fontSize: 12, color: textMuted }}> hrs</span>
+                </div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 8, backgroundColor: bgSecondary, border: `1px solid ${borderColor}` }}>
                 <div style={{ fontSize: 11, color: textMuted }}>Break Count</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: textSecondary }}>{data.breakCount}</div>
               </div>
@@ -186,9 +197,9 @@ export default function EmployeeProductivityPage() {
             {data.breakDown && (
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {Object.entries(data.breakDown).map(([key, val]) => {
-                  const labelMap = { official: 'Official', personal: 'Personal', namaz: 'Namaz', others: 'Others' };
-                  const colorMap = { official: '#3b82f6', personal: '#f59e0b', namaz: '#8b5cf6', others: '#ef4444' };
-                  const ruleMap = { official: 'Productive', personal: '60m allowed', namaz: '20m allowed', others: 'Deducted' };
+                  const labelMap = { official: 'Official', general: 'General', namaz: 'Namaz' };
+                  const colorMap = { official: '#3b82f6', general: '#f59e0b', namaz: '#8b5cf6' };
+                  const ruleMap = { official: 'No fixed limit', general: '60m allowed', namaz: '25m allowed' };
                   if (val.totalMin === 0) return null;
                   return (
                     <div key={key} style={{
@@ -338,6 +349,11 @@ export default function EmployeeProductivityPage() {
                       <div style={{ fontSize: 11, color: textMuted, marginTop: 1 }}>
                         {formatTime(brk.startedAt)} → {brk.isOpen ? 'Ongoing' : formatTime(brk.endedAt)}
                       </div>
+                      {!brk.isOpen && (
+                        <div style={{ fontSize: 11, color: brk.exceededDurationMin > 0 ? '#ef4444' : textMuted, marginTop: 1 }}>
+                          Allowed: {brk.allowedDurationMin}m • Exceeded: {brk.exceededDurationMin}m
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontWeight: 600, fontSize: 13, color: brk.isOpen ? '#f59e0b' : textSecondary }}>
                       {brk.isOpen ? 'Active' : `${brk.durationMin} min`}

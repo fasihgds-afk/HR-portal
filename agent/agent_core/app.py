@@ -330,7 +330,7 @@ class AgentApp:
             def end_offline_break():
                 send_break_reason(
                     self._config,
-                    "Others",
+                    "General",
                     "Internet disconnection (auto-detected)",
                 )
                 send_break_end(self._config)
@@ -590,7 +590,7 @@ def recover_downtime(config, shift_info=None):
     try:
         ok = send_break_start(config, effective_start)
         if ok:
-            send_break_reason(config, "Others", "System Power Off / Restart (auto-detected)")
+            send_break_reason(config, "General", "System Power Off / Restart (auto-detected)")
             send_break_end(config)
             log.info("Downtime recovery break recorded successfully")
         else:
