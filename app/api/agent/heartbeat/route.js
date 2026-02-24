@@ -190,7 +190,7 @@ export async function POST(request) {
     }
 
     // Already checked in — update activity score tracking
-    if (score !== null && state === 'ACTIVE') {
+    if (score !== null && (state === 'ACTIVE' || state === 'SUSPICIOUS')) {
       attendance._scoreSum = (attendance._scoreSum || 0) + score;
       attendance._scoreCount = (attendance._scoreCount || 0) + 1;
       attendance.avgActivityScore = Math.round(attendance._scoreSum / attendance._scoreCount);
