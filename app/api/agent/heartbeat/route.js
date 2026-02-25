@@ -130,10 +130,12 @@ export async function POST(request) {
     // Grace period: use ?? (nullish coalescing) so an explicit 0 is respected
     const gracePeriodMin = shift.gracePeriod ?? 20;
     const graceEnd = new Date(shiftStart.getTime() + gracePeriodMin * 60 * 1000);
+    const earlyLeaveBoundary = new Date(shiftEnd.getTime() - gracePeriodMin * 60 * 1000);
+    const isCheckInState = ['ACTIVE', 'IDLE', 'SUSPICIOUS'].includes(state);
 
     if (!attendance) {
       // First heartbeat for this shift day — create the record
-      const isLate = state === 'ACTIVE' && now > graceEnd;
+      const isLate = isCheckInState && now > graceEnd;
 
       attendance = await ShiftAttendance.create({
         date: attendanceDate,
@@ -142,17 +144,17 @@ export async function POST(request) {
         department: emp.department || '',
         designation: emp.designation || '',
         shift: shift.code,
-        checkIn: state === 'ACTIVE' ? now : null,
+        checkIn: isCheckInState ? now : null,
         checkOut: null,
-        totalPunches: state === 'ACTIVE' ? 1 : 0,
-        attendanceStatus: state === 'ACTIVE' ? 'Present' : null,
+        totalPunches: isCheckInState ? 1 : 0,
+        attendanceStatus: isCheckInState ? 'Present' : null,
         late: isLate,
         earlyLeave: false,
       });
 
       return NextResponse.json({
         ok: true,
-        action: state === 'ACTIVE' ? 'checked-in' : 'record-created',
+        action: isCheckInState ? 'checked-in' : 'record-created',
         attendance: {
           date: attendance.date,
           empCode: attendance.empCode,
@@ -165,8 +167,8 @@ export async function POST(request) {
     }
 
     // Record already exists — update only if needed
-    if (state === 'ACTIVE' && !attendance.checkIn) {
-      // First ACTIVE signal today — set checkIn
+    if (isCheckInState && !attendance.checkIn) {
+      // First in-shift heartbeat (ACTIVE/IDLE/SUSPICIOUS) — set checkIn
       const isLate = now > graceEnd;
 
       attendance.checkIn = now;
@@ -187,6 +189,15 @@ export async function POST(request) {
           late: attendance.late,
         },
       });
+    }
+
+    // Keep early-leave flag aligned with Shift Manager grace if checkOut exists.
+    if (attendance.checkOut) {
+      const computedEarly = attendance.checkOut < earlyLeaveBoundary;
+      if (computedEarly !== attendance.earlyLeave) {
+        attendance.earlyLeave = computedEarly;
+        await attendance.save();
+      }
     }
 
     // Already checked in — update activity score tracking
