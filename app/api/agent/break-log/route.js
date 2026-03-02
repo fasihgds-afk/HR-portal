@@ -98,7 +98,7 @@ export async function POST(request) {
         try {
           const win = computeShiftWindowForDate(clipShift, ob.date);
           if (ob.endedAt > win.graceEnd) ob.endedAt = win.graceEnd;
-          if (ob.startedAt < win.graceStart) ob.startedAt = win.graceStart;
+          if (ob.startedAt < win.shiftStart) ob.startedAt = win.shiftStart;
         } catch { /* non-fatal */ }
       }
       ob.durationMin = Math.max(0, Math.round((ob.endedAt - ob.startedAt) / 60000));
@@ -222,7 +222,7 @@ export async function PATCH(request) {
       if (shift && openBreak.date) {
         const win = computeShiftWindowForDate(shift, openBreak.date);
         if (openBreak.endedAt > win.graceEnd) openBreak.endedAt = win.graceEnd;
-        if (openBreak.startedAt < win.graceStart) openBreak.startedAt = win.graceStart;
+        if (openBreak.startedAt < win.shiftStart) openBreak.startedAt = win.shiftStart;
       }
     } catch (clipErr) {
       console.error('Shift clip warning (non-fatal):', clipErr.message);

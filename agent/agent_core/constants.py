@@ -17,6 +17,7 @@ CONNECTIVITY_CHECK_SEC = 15    # How often to check connectivity when offline
 ALIVE_SAVE_SEC = 30            # How often to persist "last alive" timestamp
 DOWNTIME_MIN_GAP_SEC = 300     # 5 min — ignore gaps shorter than this on recovery
 AUTOCLICKER_CHECK_SEC = 60     # How often to scan for cheat processes
+SHIFT_REFRESH_SEC = 600        # Re-fetch shift config every 10 minutes
 
 # Known auto-clicker / mouse-jiggler process names (lowercase).
 # If any of these are found running, the agent flags the heartbeat

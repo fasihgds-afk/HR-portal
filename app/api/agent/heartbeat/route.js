@@ -132,10 +132,20 @@ export async function POST(request) {
     const graceEnd = new Date(shiftStart.getTime() + gracePeriodMin * 60 * 1000);
     const earlyLeaveBoundary = new Date(shiftEnd.getTime() - gracePeriodMin * 60 * 1000);
     const isCheckInState = ['ACTIVE', 'IDLE', 'SUSPICIOUS'].includes(state);
+    const canCheckInNow = isCheckInState && now >= shiftStart;
 
     if (!attendance) {
-      // First heartbeat for this shift day — create the record
-      const isLate = isCheckInState && now > graceEnd;
+      // Before shift start: don't create attendance/check-in yet.
+      if (!canCheckInNow) {
+        return NextResponse.json({
+          ok: true,
+          action: 'before-shift',
+          attendance: null,
+        });
+      }
+
+      // First heartbeat for this shift day after shift start — create record
+      const isLate = now > graceEnd;
 
       attendance = await ShiftAttendance.create({
         date: attendanceDate,
@@ -144,17 +154,17 @@ export async function POST(request) {
         department: emp.department || '',
         designation: emp.designation || '',
         shift: shift.code,
-        checkIn: isCheckInState ? now : null,
+        checkIn: now,
         checkOut: null,
-        totalPunches: isCheckInState ? 1 : 0,
-        attendanceStatus: isCheckInState ? 'Present' : null,
+        totalPunches: 1,
+        attendanceStatus: 'Present',
         late: isLate,
         earlyLeave: false,
       });
 
       return NextResponse.json({
         ok: true,
-        action: isCheckInState ? 'checked-in' : 'record-created',
+        action: 'checked-in',
         attendance: {
           date: attendance.date,
           empCode: attendance.empCode,
@@ -167,7 +177,7 @@ export async function POST(request) {
     }
 
     // Record already exists — update only if needed
-    if (isCheckInState && !attendance.checkIn) {
+    if (canCheckInNow && !attendance.checkIn) {
       // First in-shift heartbeat (ACTIVE/IDLE/SUSPICIOUS) — set checkIn
       const isLate = now > graceEnd;
 
@@ -180,6 +190,23 @@ export async function POST(request) {
       return NextResponse.json({
         ok: true,
         action: 'checked-in',
+        attendance: {
+          date: attendance.date,
+          empCode: attendance.empCode,
+          shift: attendance.shift,
+          checkIn: attendance.checkIn,
+          attendanceStatus: attendance.attendanceStatus,
+          late: attendance.late,
+        },
+      });
+    }
+
+    // Strict start boundary: do not accumulate attendance score/suspicious
+    // minutes before shift start.
+    if (now < shiftStart) {
+      return NextResponse.json({
+        ok: true,
+        action: 'before-shift',
         attendance: {
           date: attendance.date,
           empCode: attendance.empCode,

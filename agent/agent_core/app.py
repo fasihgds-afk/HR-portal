@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 from .constants import (
     AGENT_VERSION, IDLE_THRESHOLD_SEC, HEARTBEAT_INTERVAL_SEC,
     CONNECTIVITY_CHECK_SEC, ALIVE_SAVE_SEC, DOWNTIME_MIN_GAP_SEC,
-    AUTOCLICKER_CHECK_SEC, AUTOCLICKER_PROCESSES, THEME,
+    AUTOCLICKER_CHECK_SEC, AUTOCLICKER_PROCESSES, SHIFT_REFRESH_SEC, THEME,
 )
 from .config import log, safe_print
 from .state import AgentState
@@ -75,6 +75,7 @@ class AgentApp:
         self._root.after(ALIVE_SAVE_SEC * 1000, self._save_alive)
         self._root.after(30000, self._check_listeners)
         self._root.after(5000, self._check_autoclicker)  # first scan after 5s
+        self._root.after(SHIFT_REFRESH_SEC * 1000, self._refresh_shift_info)
 
         log.info(
             "v%s started (idle=%ds, hb=%ds, shift=%s→%s)",
@@ -344,6 +345,27 @@ class AgentApp:
                 network.flush_buffer()
             threading.Thread(target=flush, daemon=True).start()
 
+    # ─── Dynamic shift refresh (every 10 min) ───────────────────
+
+    def _refresh_shift_info(self):
+        """Keep local shift window synced with Shift Manager changes."""
+        try:
+            info = network.fetch_shift_info(self._config)
+            if info:
+                self.state.shift_start = info.get("shiftStart")
+                self.state.shift_end = info.get("shiftEnd")
+                self.state.shift_grace_min = info.get("gracePeriod", 20)
+                self.state.shift_crosses_midnight = info.get("crossesMidnight", False)
+                log.info(
+                    "Shift config refreshed: %s→%s (grace=%s)",
+                    self.state.shift_start or "?",
+                    self.state.shift_end or "?",
+                    self.state.shift_grace_min,
+                )
+        except Exception as e:
+            log.warning("Shift refresh failed (non-fatal): %s", e)
+        self._root.after(SHIFT_REFRESH_SEC * 1000, self._refresh_shift_info)
+
     # ─── Auto-clicker detection (every 60s) ─────────────────
 
     def _check_autoclicker(self):
@@ -527,8 +549,6 @@ def recover_downtime(config, shift_info=None):
             crosses = shift_info.get("crossesMidnight", False)
 
             if shift_end_str and shift_start_str:
-                from datetime import date as _date_cls
-
                 alive_dt = datetime.fromtimestamp(last_alive, tz=_PKT)
                 alive_date = alive_dt.date()
 
@@ -565,7 +585,7 @@ def recover_downtime(config, shift_info=None):
                     )
 
                 grace_end_ts = shift_end_dt.timestamp() + grace_sec
-                grace_start_ts = shift_start_dt.timestamp() - grace_sec
+                shift_start_ts = shift_start_dt.timestamp()
 
                 # Skip entirely if last_alive was already past grace end
                 if last_alive >= grace_end_ts:
@@ -576,8 +596,8 @@ def recover_downtime(config, shift_info=None):
                     network.save_alive_ts(emp_code)
                     return
 
-                if effective_start < grace_start_ts:
-                    effective_start = grace_start_ts
+                if effective_start < shift_start_ts:
+                    effective_start = shift_start_ts
 
                 clipped_gap = grace_end_ts - effective_start
                 log.info(

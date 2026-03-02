@@ -47,7 +47,7 @@ function getBreakDuration(b, now, shift) {
   if (shift && b.date) {
     try {
       const win = computeShiftWindowForDate(shift, b.date);
-      const gs = win.graceStart.getTime();
+      const gs = win.shiftStart.getTime(); // strict start boundary
       const ge = win.graceEnd.getTime();
       if (start < gs) start = gs;
       if (end > ge) end = ge;
@@ -170,9 +170,18 @@ export async function GET(request) {
       // Hours worked: checkIn → checkOut (or now)
       let totalWorkedMin = 0;
       if (att.checkIn) {
-        const checkInTime = new Date(att.checkIn).getTime();
-        const checkOutTime = att.checkOut ? new Date(att.checkOut).getTime() : now;
-        totalWorkedMin = Math.round((checkOutTime - checkInTime) / 60000);
+        let checkInTime = new Date(att.checkIn).getTime();
+        let checkOutTime = att.checkOut ? new Date(att.checkOut).getTime() : now;
+        if (shift) {
+          try {
+            const win = computeShiftWindowForDate(shift, att.date);
+            const shiftStartMs = win.shiftStart.getTime();
+            const graceEndMs = win.graceEnd.getTime();
+            if (checkInTime < shiftStartMs) checkInTime = shiftStartMs;
+            if (checkOutTime > graceEndMs) checkOutTime = graceEndMs;
+          } catch { /* fallback: raw check-in/out */ }
+        }
+        totalWorkedMin = Math.max(0, Math.round((checkOutTime - checkInTime) / 60000));
       }
 
       // ── Break analysis by category ─────────────────────
