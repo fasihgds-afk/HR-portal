@@ -234,26 +234,22 @@ class AgentApp:
 
         # ── Heartbeat ────────────────────────────
         interval = self._config.get("heartbeatIntervalSec", HEARTBEAT_INTERVAL_SEC)
-        state_changed = current != self.state.last_heartbeat_state
+        score = None
+        cheat_flag = bool(self._autoclicker_detected)
+        hb_state = current
+        if current == "ACTIVE":
+            score = self._tracker.calculate_activity_score()
+            if cheat_flag:
+                hb_state = "SUSPICIOUS"
+                score = 0
+                log.warning("SUSPICIOUS — auto-clicker running: %s",
+                            ", ".join(self._autoclicker_detected))
+
+        state_changed = hb_state != self.state.last_heartbeat_state
         interval_elapsed = (now - self.state.last_heartbeat_time) >= interval
 
         if (state_changed or interval_elapsed) and not self.state.heartbeat_in_flight:
-            score = None
-            cheat_flag = bool(self._autoclicker_detected)
-            hb_state = current
-
-            if current == "ACTIVE":
-                score = self._tracker.calculate_activity_score()
-                if cheat_flag:
-                    hb_state = "SUSPICIOUS"
-                    score = 0
-                    log.warning("SUSPICIOUS — auto-clicker running: %s",
-                                ", ".join(self._autoclicker_detected))
-                elif score is not None and score < 30:
-                    hb_state = "SUSPICIOUS"
-                    log.warning("SUSPICIOUS — low activity score: %d", score)
-
-            self.state.last_heartbeat_state = current
+            self.state.last_heartbeat_state = hb_state
             self.state.last_heartbeat_time = now
             self.state.heartbeat_in_flight = True
 

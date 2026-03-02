@@ -11,8 +11,6 @@ import SuspiciousLog from '@/models/SuspiciousLog';
 import { verifyToken } from '@/lib/security/tokens';
 import { resolveShiftWindow } from '@/lib/shift/resolveShiftWindow';
 
-const SUSPICIOUS_THRESHOLD = 30; // Score below this = suspicious
-
 function floorToMinute(date) {
   const d = new Date(date);
   d.setSeconds(0, 0);
@@ -75,14 +73,11 @@ export async function POST(request) {
       device.lastActivityScore = score;
     }
 
-    // Agent sends SUSPICIOUS when auto-clicker detected or score < 30
+    // Agent sends SUSPICIOUS when auto-clicker is detected.
     if (state === 'SUSPICIOUS' || autoClickerDetected) {
       effectiveState = 'SUSPICIOUS';
       device.suspiciousCount = (device.suspiciousCount || 0) + 1;
-    } else if (state === 'ACTIVE' && score !== null && score < SUSPICIOUS_THRESHOLD) {
-      effectiveState = 'SUSPICIOUS';
-      device.suspiciousCount = (device.suspiciousCount || 0) + 1;
-    } else if (state === 'ACTIVE') {
+    } else {
       device.suspiciousCount = 0;
     }
 

@@ -115,13 +115,13 @@ export default function MonitoringPage() {
   const filtered = filter === 'ALL'
     ? employees
     : filter === 'SUSPICIOUS'
-      ? employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.suspiciousMinutes > 0))
+      ? employees.filter(e => e.liveStatus === 'SUSPICIOUS')
       : employees.filter(e => e.liveStatus === filter);
 
   const totalActive = employees.filter(e => e.liveStatus === 'ACTIVE').length;
   const totalIdle = employees.filter(e => e.liveStatus === 'IDLE').length;
   const totalOffline = employees.filter(e => e.liveStatus === 'OFFLINE').length;
-  const totalSuspicious = employees.filter(e => e.liveStatus === 'SUSPICIOUS' || (e.suspiciousMinutes > 0)).length;
+  const totalSuspicious = employees.filter(e => e.liveStatus === 'SUSPICIOUS').length;
 
   // Theme-aware styles
   const bgPrimary = colors?.background?.primary || '#020617';
