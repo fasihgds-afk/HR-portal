@@ -13,6 +13,12 @@ import { resolveShiftWindow } from '@/lib/shift/resolveShiftWindow';
 
 const SUSPICIOUS_THRESHOLD = 30; // Score below this = suspicious
 
+function floorToMinute(date) {
+  const d = new Date(date);
+  d.setSeconds(0, 0);
+  return d;
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -129,10 +135,13 @@ export async function POST(request) {
 
     // Grace period: use ?? (nullish coalescing) so an explicit 0 is respected
     const gracePeriodMin = shift.gracePeriod ?? 20;
-    const graceEnd = new Date(shiftStart.getTime() + gracePeriodMin * 60 * 1000);
-    const earlyLeaveBoundary = new Date(shiftEnd.getTime() - gracePeriodMin * 60 * 1000);
+    const shiftStartMin = floorToMinute(shiftStart);
+    const shiftEndMin = floorToMinute(shiftEnd);
+    const nowMin = floorToMinute(now);
+    const graceEnd = new Date(shiftStartMin.getTime() + gracePeriodMin * 60 * 1000);
+    const earlyLeaveBoundary = new Date(shiftEndMin.getTime() - gracePeriodMin * 60 * 1000);
     const isCheckInState = ['ACTIVE', 'IDLE', 'SUSPICIOUS'].includes(state);
-    const canCheckInNow = isCheckInState && now >= shiftStart;
+    const canCheckInNow = isCheckInState && nowMin >= shiftStartMin;
 
     if (!attendance) {
       // Before shift start: don't create attendance/check-in yet.
@@ -145,7 +154,9 @@ export async function POST(request) {
       }
 
       // First heartbeat for this shift day after shift start — create record
-      const isLate = now > graceEnd;
+      // Inclusive boundary:
+      // check-in at exactly start+grace is NOT late; after that is late.
+      const isLate = nowMin > graceEnd;
 
       attendance = await ShiftAttendance.create({
         date: attendanceDate,
@@ -179,7 +190,7 @@ export async function POST(request) {
     // Record already exists — update only if needed
     if (canCheckInNow && !attendance.checkIn) {
       // First in-shift heartbeat (ACTIVE/IDLE/SUSPICIOUS) — set checkIn
-      const isLate = now > graceEnd;
+      const isLate = nowMin > graceEnd;
 
       attendance.checkIn = now;
       attendance.attendanceStatus = 'Present';
@@ -220,7 +231,9 @@ export async function POST(request) {
 
     // Keep early-leave flag aligned with Shift Manager grace if checkOut exists.
     if (attendance.checkOut) {
-      const computedEarly = attendance.checkOut < earlyLeaveBoundary;
+      // Inclusive boundary:
+      // check-out at exactly end-grace is NOT early; before that is early.
+      const computedEarly = floorToMinute(attendance.checkOut) < earlyLeaveBoundary;
       if (computedEarly !== attendance.earlyLeave) {
         attendance.earlyLeave = computedEarly;
         await attendance.save();
